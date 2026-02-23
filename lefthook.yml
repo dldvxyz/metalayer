@@ -1,0 +1,21 @@
+pre-commit:
+  piped: true # Stop further execution if a job fails
+  jobs:
+    - name: Lint and format
+      glob:
+        - "*.{js,ts}"
+        - "*.{cjs,cts}"
+        - "*.{mjs,mts}"
+        - "*.{json,jsonc}"
+      group:
+        piped: true
+        jobs:
+          - name: Lint
+            run: bun lint-and-fix {staged_files}
+          - name: Format
+            run: bun format {staged_files}
+            stage-fixed: true
+    - name: Run tests
+      run: bun run test
+    - name: Build the app
+      run: bun run build

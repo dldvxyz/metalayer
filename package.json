@@ -1,0 +1,67 @@
+{
+  "name": "metalayer",
+  "version": "1.0.0",
+  "description": "Typesafe utility functions for generating robots.txt, webmanifest, and sitemap.xml",
+  "keywords": [
+    "metadata",
+    "robots.txt",
+    "webmanifest",
+    "sitemap",
+    "seo",
+    "pwa"
+  ],
+  "license": "MIT",
+  "author": "dldv",
+  "homepage": "https://github.com/dldvxyz/metalayer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dldvxyz/metalayer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dldvxyz/metalayer/issues"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/_barrel.d.ts",
+        "default": "./dist/_barrel.js"
+      },
+      "require": {
+        "types": "./dist/_barrel.d.cts",
+        "default": "./dist/_barrel.cjs"
+      }
+    }
+  },
+  "main": "./dist/_barrel.cjs",
+  "module": "./dist/_barrel.js",
+  "types": "./dist/_barrel.d.ts",
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "bun@1.3.9",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "bun run typecheck && bun run test && bun run build",
+    "lint": "ultracite check",
+    "lint-and-fix": "ultracite fix",
+    "format": "biome format --write"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.0",
+    "@types/node": "^25.3.0",
+    "lefthook": "^2.1.1",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "ultracite": "7.2.3",
+    "vitest": "^2.0.0"
+  }
+}
