@@ -21,20 +21,24 @@ npm install metalayer
 ```ts
 import { generateRobotsTxt, validateRobotsTxt } from "metalayer";
 
-const options = {
+const result = validateRobotsTxt({
   rules: [
-    { userAgent: "*", allow: "/" },
-    { userAgent: "GPTBot", disallow: "/" },
+    { userAgent: ["*"], allow: ["/"] },
+    { userAgent: ["GPTBot"], disallow: ["/"] },
   ],
   sitemaps: ["https://example.com/sitemap.xml"],
-};
+});
 
-const result = validateRobotsTxt(options);
 if (!result.valid) {
   console.error(result.issues);
+  // handle error
 }
 
-const robotsTxt = generateRobotsTxt(options);
+const robotsTxt = generateRobotsTxt(result.options);
+return new Response(robotsTxt, {
+  headers: { "Content-Type": "text/plain", "Cache-Control": "max-age=86400" },
+});
+
 // User-agent: *
 // Allow: /
 //
@@ -49,27 +53,26 @@ const robotsTxt = generateRobotsTxt(options);
 ```ts
 import { generateSitemap, validateSitemap } from "metalayer";
 
-const options = {
+const result = validateSitemap({
+  origin: "https://example.com",
   urls: [
-    {
-      loc: "https://example.com/",
-      lastmod: "2025-01-15",
-      changefreq: "weekly",
-      priority: 1.0,
-    },
-    {
-      loc: "https://example.com/about",
-      priority: 0.8,
-    },
+    { path: "/", lastmod: "2025-01-15", changefreq: "weekly", priority: 1.0 },
+    { path: "/about", priority: 0.8 },
   ],
-};
+});
 
-const result = validateSitemap(options);
 if (!result.valid) {
   console.error(result.issues);
+  // handle error
 }
 
-const sitemapXml = generateSitemap(options);
+const sitemapXml = generateSitemap(result.options);
+return new Response(sitemapXml, {
+  headers: {
+    "Content-Type": "application/xml",
+    "Cache-Control": "max-age=86400",
+  },
+});
 ```
 
 ### Web App Manifest
@@ -77,7 +80,7 @@ const sitemapXml = generateSitemap(options);
 ```ts
 import { generateManifest, validateManifest } from "metalayer";
 
-const options = {
+const result = validateManifest({
   name: "My App",
   short_name: "App",
   start_url: "/",
@@ -89,14 +92,20 @@ const options = {
     { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
     { src: "/icon.svg", sizes: "any", type: "image/svg+xml" },
   ],
-};
+});
 
-const result = validateManifest(options);
 if (!result.valid) {
   console.error(result.issues);
+  // handle error
 }
 
-const manifestJson = generateManifest(options);
+const manifestJson = generateManifest(result.options);
+return new Response(manifestJson, {
+  headers: {
+    "Content-Type": "application/manifest+json",
+    "Cache-Control": "max-age=86400",
+  },
+});
 ```
 
 ## Validation
@@ -111,22 +120,38 @@ type ValidationResult<T> =
 
 Validators catch issues like:
 
-- **robots.txt**: wildcard mixed with specific agents, duplicate user agents, overlapping allow/disallow paths
-- **sitemap**: invalid URLs, mismatched origins, duplicate URLs, out-of-range priority, invalid dates
-- **manifest**: non-square icon sizes, SVG without `sizes: "any"`, invalid colors, protocol handler issues, scope violations
+- **robots.txt** — wildcard mixed with specific agents, duplicate user agents, overlapping allow/disallow paths, invalid crawl delay
+- **sitemap** — invalid URLs, duplicate URLs, out-of-range priority, impossible or future dates
+- **manifest** — non-square icon sizes, SVG without `sizes: "any"`, invalid colors, protocol handler issues, scope violations, duplicate categories
+
+## A note on runtime validation
+
+You probably shouldn't use the validation functions in production unless you're building the metadata programmatically (e.g. generating a sitemap from database entries). For static metadata like `robots.txt` and `manifest.webmanifest`, validate once during development and serve the output directly.
+
+If you do build sitemaps programmatically, consider having a pre-validated fallback so a validation failure doesn't take down your sitemap endpoint entirely.
 
 ## Types
 
 All types are exported for use in your own code:
 
 ```ts
-import type {
-  RobotsOptions,
-  SitemapOptions,
-  WebManifestOptions,
-} from "metalayer";
+import type { RobotsOptions, SitemapOptions, ManifestOptions } from "metalayer";
 ```
+
+## Generating strings outside JavaScript
+
+You can use metalayer to generate metadata strings for projects in any language. Clone the repo, install dependencies, edit `generate.ts` with your configuration, and run:
+
+```bash
+git clone https://github.com/dldvxyz/metalayer.git
+cd metalayer
+bun install
+# Edit generate.ts with your options
+bun run generate
+```
+
+The output is printed to stdout so you can redirect it to a file or copy it into your project.
 
 ## License
 
-MIT
+[MIT](./LICENSE)

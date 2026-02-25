@@ -1,4 +1,16 @@
-export type { AbsoluteUrl, PathString, ValidationResult } from "./_shared";
+/**
+ * Public type definitions for metalayer.
+ *
+ * @module
+ */
+
+export type {
+  AbsoluteUrl,
+  NonEmptyArray,
+  NonUnitaryArray,
+  UrlPath,
+  ValidationResult
+} from "./_shared.js";
 
 export type {
   CssColor,
@@ -9,15 +21,16 @@ export type {
   ManifestDisplayOverride,
   ManifestFileHandler,
   ManifestImageResource,
+  ManifestImageResourceBase,
   ManifestLaunchHandler,
+  ManifestOptions,
   ManifestOrientation,
   ManifestProtocolHandler,
   ManifestRelatedApplication,
   ManifestScreenshot,
   ManifestShareTarget,
   ManifestShortcut,
-  UrlString,
-  WebManifestOptions
+  UrlOrPath
 } from "./manifest.js";
 
 export type {
@@ -28,6 +41,8 @@ export type {
 
 export type {
   IsoDate,
+  IsoDateOrDateTime,
+  IsoDateTime,
   SitemapChangeFreq,
   SitemapOptions,
   SitemapUrl

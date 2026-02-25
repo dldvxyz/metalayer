@@ -45,14 +45,13 @@ describe("generateManifest", () => {
   });
 
   it("handles empty options", () => {
-    // @ts-expect-error
-    const result = generateManifest({});
+    const result = generateManifest({} as any);
     expect(JSON.parse(result)).toEqual({});
   });
 
-  it("does not end with a trailing newline", () => {
+  it("ends with a trailing newline", () => {
     const result = generateManifest({ name: "Test" });
-    expect(result.endsWith("\n")).toBe(false);
+    expect(result.endsWith("\n")).toBe(true);
   });
 
   it("includes shortcuts", () => {
@@ -169,11 +168,35 @@ describe("generateManifest", () => {
     const result = generateManifest({
       name: "App",
       start_url: "/app/home",
-      scope: "/app"
+      scope: "https://example.com/app"
     });
     const parsed = JSON.parse(result);
     expect(parsed.start_url).toBe("/app/home");
-    expect(parsed.scope).toBe("/app");
+    expect(parsed.scope).toBe("https://example.com/app");
+  });
+
+  it("normalizes absolute URLs", () => {
+    const result = generateManifest({
+      name: "App",
+      scope: "https://Example.COM/app",
+      start_url: "https://Example.COM/app/home",
+      shortcuts: [{ name: "Home", url: "https://Example.COM/app/" }]
+    });
+    const parsed = JSON.parse(result);
+    expect(parsed.scope).toBe("https://example.com/app");
+    expect(parsed.start_url).toBe("https://example.com/app/home");
+    expect(parsed.shortcuts[0].url).toBe("https://example.com/app/");
+  });
+
+  it("preserves path URLs without normalization", () => {
+    const result = generateManifest({
+      name: "App",
+      start_url: "/app/home",
+      shortcuts: [{ name: "Home", url: "/app/" }]
+    });
+    const parsed = JSON.parse(result);
+    expect(parsed.start_url).toBe("/app/home");
+    expect(parsed.shortcuts[0].url).toBe("/app/");
   });
 
   it("round-trips a comprehensive manifest", () => {
@@ -182,7 +205,7 @@ describe("generateManifest", () => {
       short_name: "PWA",
       description: "A fully featured app",
       start_url: "/",
-      scope: "/",
+      scope: "https://example.com/",
       id: "com.example.pwa",
       display: "standalone",
       display_override: ["window-controls-overlay", "standalone"],
@@ -225,7 +248,7 @@ describe("validateManifest", () => {
       short_name: "PWA",
       description: "A progressive web app",
       start_url: "/app",
-      scope: "/app",
+      scope: "https://example.com/app",
       display: "standalone",
       theme_color: "#ffffff",
       background_color: "rgb(0, 0, 0)",
@@ -336,16 +359,12 @@ describe("validateManifest", () => {
 
   // Screenshot validation
 
-  it("validates screenshots the same as icons", () => {
+  it("accepts non-square screenshot sizes", () => {
     const result = validateManifest({
       name: "App",
       screenshots: [{ src: "/screenshot.png", sizes: "192x256" }]
     });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("192x256");
-      expect(result.issues[0]).toContain("square");
-    }
+    expect(result.valid).toBe(true);
   });
 
   it("detects duplicate screenshot src", () => {
@@ -382,19 +401,21 @@ describe("validateManifest", () => {
   it("detects shortcut URL outside scope", () => {
     const result = validateManifest({
       name: "App",
-      scope: "/app",
+      scope: "https://example.com/app",
       shortcuts: [{ name: "Settings", url: "/settings" }]
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
-      expect(result.issues[0]).toContain("outside the manifest scope");
+      expect(result.issues).toContainEqual(
+        expect.stringContaining("outside the manifest scope")
+      );
     }
   });
 
   it("accepts shortcut URL within scope", () => {
     const result = validateManifest({
       name: "App",
-      scope: "/app",
+      scope: "https://example.com/app",
       shortcuts: [{ name: "Settings", url: "/app/settings" }]
     });
     expect(result.valid).toBe(true);
@@ -424,12 +445,13 @@ describe("validateManifest", () => {
     const result = validateManifest({
       name: "App",
       start_url: "/other",
-      scope: "/app"
+      scope: "https://example.com/app"
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
-      expect(result.issues[0]).toContain("start_url");
-      expect(result.issues[0]).toContain("outside the manifest scope");
+      expect(result.issues).toContainEqual(
+        expect.stringContaining("outside the manifest scope")
+      );
     }
   });
 
@@ -437,9 +459,57 @@ describe("validateManifest", () => {
     const result = validateManifest({
       name: "App",
       start_url: "/app/home",
-      scope: "/app"
+      scope: "https://example.com/app"
     });
     expect(result.valid).toBe(true);
+  });
+
+  it("accepts absolute start_url within scope", () => {
+    const result = validateManifest({
+      name: "App",
+      start_url: "https://example.com/app/home",
+      scope: "https://example.com/app"
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects absolute start_url outside scope", () => {
+    const result = validateManifest({
+      name: "App",
+      start_url: "https://other.com/app",
+      scope: "https://example.com/app"
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues).toContainEqual(
+        expect.stringContaining("outside the manifest scope")
+      );
+    }
+  });
+
+  it("rejects invalid scope", () => {
+    const result = validateManifest({
+      name: "App",
+      scope: "/app" as any
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("Invalid scope");
+    }
+  });
+
+  it("skips scope checks when scope is invalid", () => {
+    const result = validateManifest({
+      name: "App",
+      scope: "not-a-url" as any,
+      start_url: "/other"
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      // Should only have the invalid scope issue, not a start_url scope issue
+      expect(result.issues).toHaveLength(1);
+      expect(result.issues[0]).toContain("Invalid scope");
+    }
   });
 
   // Color validation
@@ -487,7 +557,7 @@ describe("validateManifest", () => {
   it("rejects invalid background_color", () => {
     const result = validateManifest({
       name: "App",
-      background_color: "nope"
+      background_color: "not-a-color"
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
@@ -630,18 +700,207 @@ describe("validateManifest", () => {
     expect(resultLong.valid).toBe(true);
   });
 
+  // Path validation
+
+  it("rejects invalid icon src path", () => {
+    const result = validateManifest({
+      name: "App",
+      icons: [{ src: "/icon//bad.png" as any, sizes: "192x192" }]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL or path");
+    }
+  });
+
+  it("accepts valid icon src path", () => {
+    const result = validateManifest({
+      name: "App",
+      icons: [{ src: "/icons/icon-192.png", sizes: "192x192" }]
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects invalid start_url path", () => {
+    const result = validateManifest({
+      name: "App",
+      start_url: "/app//home" as any
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL or path");
+    }
+  });
+
+  it("rejects invalid shortcut URL path", () => {
+    const result = validateManifest({
+      name: "App",
+      shortcuts: [{ name: "Home", url: "/app//home" as any }]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL or path");
+    }
+  });
+
+  it("rejects invalid file handler action path", () => {
+    const result = validateManifest({
+      name: "App",
+      file_handlers: [
+        { action: "/open//file" as any, accept: { "text/plain": [".txt"] } }
+      ]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL or path");
+    }
+  });
+
+  it("rejects invalid share target action path", () => {
+    const result = validateManifest({
+      name: "App",
+      share_target: {
+        action: "/share//target" as any,
+        params: { title: "t" }
+      }
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL or path");
+    }
+  });
+
+  // Name validation
+
+  it("rejects whitespace-only name", () => {
+    const result = validateManifest({ name: "  " } as any);
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("name");
+    }
+  });
+
+  // Id validation
+
+  it("accepts freeform id without validation", () => {
+    const result = validateManifest({ name: "App", id: "my-app" });
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts URL-like id within scope", () => {
+    const result = validateManifest({
+      name: "App",
+      scope: "https://example.com/app",
+      id: "/app/main"
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects URL-like id outside scope", () => {
+    const result = validateManifest({
+      name: "App",
+      scope: "https://example.com/app",
+      id: "/other"
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("outside the manifest scope");
+    }
+  });
+
+  // ICO / multi-size icons
+
+  it("accepts ICO file with multiple sizes", () => {
+    const result = validateManifest({
+      name: "App",
+      icons: [
+        { src: "/favicon.ico", sizes: ["16x16", "32x32"], type: "image/x-icon" }
+      ]
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects non-ICO file with multiple sizes", () => {
+    const result = validateManifest({
+      name: "App",
+      icons: [{ src: "/icon.png", sizes: ["16x16", "32x32"] as any }]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("Only ICO");
+    }
+  });
+
+  // scope_extensions
+
+  it("accepts valid scope_extensions origin", () => {
+    const result = validateManifest({
+      name: "App",
+      scope_extensions: [{ origin: "https://other.com" }]
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects scope_extensions origin with path", () => {
+    const result = validateManifest({
+      name: "App",
+      scope_extensions: [{ origin: "https://other.com/app" as any }]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("bare origin");
+    }
+  });
+
+  // related_applications
+
+  it("rejects invalid related_applications URL", () => {
+    const result = validateManifest({
+      name: "App",
+      related_applications: [{ platform: "play", url: "not-a-url" as any }]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("not a valid URL");
+    }
+  });
+
+  // display_override duplicates
+
+  it("detects duplicate display_override values", () => {
+    const result = validateManifest({
+      name: "App",
+      display_override: ["standalone", "standalone"]
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.issues[0]).toContain("Duplicate value");
+    }
+  });
+
   // Multiple issues
 
   it("collects multiple issues", () => {
     const result = validateManifest({
       name: "App",
-      theme_color: "bad" as any,
-      background_color: "worse" as any,
+      theme_color: "not-a-color" as any,
+      background_color: "still-not-a-color" as any,
       categories: ["A", "a"]
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
       expect(result.issues.length).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe("generateManifest — protocol handler %s preservation", () => {
+  it("preserves %s in protocol handler URL after normalization", () => {
+    const result = generateManifest({
+      name: "App",
+      protocol_handlers: [{ protocol: "web+custom", url: "/handle?val=%s" }]
+    });
+    const parsed = JSON.parse(result);
+    expect(parsed.protocol_handlers[0].url).toContain("%s");
   });
 });

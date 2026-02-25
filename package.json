@@ -1,7 +1,7 @@
 {
   "name": "metalayer",
-  "version": "1.0.0",
-  "description": "Typesafe utility functions for generating robots.txt, webmanifest, and sitemap.xml",
+  "version": "1.0.1",
+  "description": "Generate typesafe metadata for websites",
   "keywords": [
     "metadata",
     "robots.txt",
@@ -20,6 +20,23 @@
   "bugs": {
     "url": "https://github.com/dldvxyz/metalayer/issues"
   },
+  "scripts": {
+    "$ Development": "",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "build": "tsup",
+    "$ Linting and formatting": "",
+    "lint": "ultracite check",
+    "lint-n-fix": "ultracite fix",
+    "format": "biome format --write",
+    "$ Testing": "",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "$ Generate": "",
+    "generate": "bun run generate.ts",
+    "$ NPM": "",
+    "prepublishOnly": "bun run typecheck && bun run test && bun run build"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -33,28 +50,10 @@
       }
     }
   },
-  "main": "./dist/_barrel.cjs",
-  "module": "./dist/_barrel.js",
-  "types": "./dist/_barrel.d.ts",
   "files": [
     "dist"
   ],
   "sideEffects": false,
-  "engines": {
-    "node": ">=18"
-  },
-  "packageManager": "bun@1.3.9",
-  "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "prepublishOnly": "bun run typecheck && bun run test && bun run build",
-    "lint": "ultracite check",
-    "lint-and-fix": "ultracite fix",
-    "format": "biome format --write"
-  },
   "devDependencies": {
     "@biomejs/biome": "2.4.0",
     "@types/node": "^25.3.0",
