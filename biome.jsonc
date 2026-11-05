@@ -6,27 +6,29 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
-  "files": {
-    "ignoreUnknown": true
+  "assist": {
+    "actions": {
+      "source": {
+        // Member and key order is deliberate: option types follow the order of
+        // the specs they model, and test fixtures read top-down.
+        "useSortedKeys": "off",
+        "useSortedInterfaceMembers": "off",
+        "useSortedTypeFields": "off"
+      }
+    }
   },
   "linter": {
     "rules": {
       "performance": {
+        // The package entry point is intentionally a barrel of the public API.
         "noBarrelFile": "off"
       },
       "style": {
-        "useTemplate": "off", // Concatenation is more performant
+        "useTemplate": "off",
         "useBlockStatements": "off"
       },
       "complexity": {
         "noExcessiveCognitiveComplexity": "off"
-      }
-    }
-  },
-  "assist": {
-    "actions": {
-      "source": {
-        "useSortedInterfaceMembers": "off"
       }
     }
   },

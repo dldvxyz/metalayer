@@ -1,4 +1,4 @@
-import type { AbsoluteUrl, NonEmptyArray, UrlPath } from "./_shared.js";
+import type { AbsoluteUrl, NonEmptyArray, UrlPath } from "./shared.js";
 
 /** ISO 8601 date: YYYY-MM-DD */
 export type IsoDate = `${number}-${number}-${number}`;

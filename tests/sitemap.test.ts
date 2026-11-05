@@ -115,7 +115,7 @@ describe("generateSitemap", () => {
     expect(result).toContain("<lastmod>2024-01-01</lastmod>");
     expect(result).toContain("<changefreq>weekly</changefreq>");
     // Each URL should have its own <url> block
-    const urlCount = (result.match(/<url>/g) || []).length;
+    const urlCount = (result.match(/<url>/gu) || []).length;
     expect(urlCount).toBe(3);
   });
 

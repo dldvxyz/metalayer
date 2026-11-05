@@ -1,66 +1,73 @@
 {
   "name": "metalayer",
   "version": "1.0.1",
-  "description": "Generate typesafe metadata for websites",
+  "description": "Typesafe generators and validators for robots.txt, sitemap.xml and the Web App Manifest",
   "keywords": [
     "metadata",
     "robots.txt",
     "webmanifest",
+    "manifest",
     "sitemap",
     "seo",
-    "pwa"
+    "pwa",
+    "typescript"
   ],
-  "license": "MIT",
-  "author": "dldv",
   "homepage": "https://github.com/dldvxyz/metalayer#readme",
+  "bugs": {
+    "url": "https://github.com/dldvxyz/metalayer/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dldvxyz/metalayer.git"
   },
-  "bugs": {
-    "url": "https://github.com/dldvxyz/metalayer/issues"
-  },
-  "scripts": {
-    "$ Development": "",
-    "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit",
-    "build": "tsup",
-    "$ Linting and formatting": "",
-    "lint": "ultracite check",
-    "lint-n-fix": "ultracite fix",
-    "format": "biome format --write",
-    "$ Testing": "",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "$ Generate": "",
-    "generate": "bun run generate.ts",
-    "$ NPM": "",
-    "prepublishOnly": "bun run typecheck && bun run test && bun run build"
-  },
+  "license": "MIT",
+  "author": "dldv",
+  "sideEffects": false,
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/_barrel.d.ts",
-        "default": "./dist/_barrel.js"
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
       },
       "require": {
-        "types": "./dist/_barrel.d.cts",
-        "default": "./dist/_barrel.cjs"
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
       }
-    }
+    },
+    "./package.json": "./package.json"
   },
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.cts",
   "files": [
     "dist"
   ],
-  "sideEffects": false,
+  "scripts": {
+    "build": "tsdown",
+    "check": "bun run lint && bun run typecheck && bun run test && bun run build && node scripts/check-dist.mjs",
+    "dev": "tsdown --watch",
+    "format": "biome format --write",
+    "generate": "bun run scripts/generate.ts",
+    "lint": "ultracite check",
+    "lint:fix": "ultracite fix",
+    "prepublishOnly": "bun run check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc"
+  },
   "devDependencies": {
-    "@biomejs/biome": "2.4.0",
-    "@types/node": "^25.3.0",
-    "lefthook": "^2.1.1",
-    "tsup": "^8.0.0",
-    "typescript": "^5.4.0",
-    "ultracite": "7.2.3",
-    "vitest": "^2.0.0"
+    "@arethetypeswrong/core": "^0.18.5",
+    "@biomejs/biome": "2.6.5",
+    "@types/node": "^26.6.6",
+    "lefthook": "^2.2.2",
+    "publint": "^0.3.25",
+    "tsdown": "^0.23.5",
+    "typescript": "^7.0.2",
+    "ultracite": "8.1.1",
+    "vitest": "^5.1.0"
+  },
+  "packageManager": "bun@1.4.4",
+  "engines": {
+    "node": ">=20"
   }
 }

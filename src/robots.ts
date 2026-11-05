@@ -4,8 +4,8 @@
  * @module
  */
 
-import type { ValidationResult } from "./types/_shared.js";
 import type { RobotsOptions } from "./types/robots.js";
+import type { ValidationResult } from "./types/shared.js";
 import { normalizeUrl, validatePath, validateUrl } from "./utils/url.js";
 
 /**
@@ -35,7 +35,8 @@ function validatePaths(
  * Matches a valid ASCII hostname: one or more labels separated by dots, ending with a 2+ char TLD.
  * Internationalized domain names (IDN) must be Punycode-encoded (e.g. "xn--nxasmq6b.com") to match.
  */
-const HOSTNAME_RX = /^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/i;
+const HOSTNAME_RX =
+  /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/u;
 
 /**
  * Validates a robots.txt configuration for common mistakes.
@@ -106,14 +107,11 @@ export function validateRobotsTxt(
     }
 
     // Detect paths that appear in both allow and disallow after normalization.
-    // 1. Build a Set of normalized disallow paths for O(1) lookups.
-    // 2. Normalize each allow path into a parallel array (same indices as `allows`).
-    // 3. Filter `allows` by checking whether normalizedAllows[i] is in the Set.
-    //    This maps back to the original un-normalized path for the error message.
-    const normalizedDisallowSet = new Set(disallows.map(normalizeUrl));
-    const normalizedAllows = allows.map(normalizeUrl);
-    const overlapping = allows.filter((_, i) =>
-      normalizedDisallowSet.has(normalizedAllows[i])
+    // The original (un-normalized) allow paths are reported so the message
+    // matches what the user wrote.
+    const normalizedDisallows = new Set(disallows.map(normalizeUrl));
+    const overlapping = allows.filter((path) =>
+      normalizedDisallows.has(normalizeUrl(path))
     );
 
     if (overlapping.length > 0) {

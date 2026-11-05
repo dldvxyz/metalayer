@@ -1,4 +1,4 @@
-import type { AbsoluteUrl, NonEmptyArray, UrlPath } from "./_shared.js";
+import type { AbsoluteUrl, NonEmptyArray, UrlPath } from "./shared.js";
 
 /**
  * User-agent identifier for robots.txt rules.

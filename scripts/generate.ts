@@ -6,8 +6,8 @@
  *   bun run generate > robots.txt
  */
 
-import type { RobotsOptions } from "./src/_barrel.js";
-import { generateRobotsTxt, validateRobotsTxt } from "./src/_barrel.js";
+import type { RobotsOptions } from "../src/index.js";
+import { generateRobotsTxt, validateRobotsTxt } from "../src/index.js";
 
 const options: RobotsOptions = {
   rules: [

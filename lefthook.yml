@@ -8,11 +8,14 @@ pre-commit:
       glob:
         - "*.ts"
         - "*.{json,jsonc}"
-      run: bun lint-n-fix {staged_files}
+      run: bun run lint:fix {staged_files}
       stage-fixed: true
+
+    - name: Typecheck
+      run: bun run typecheck
 
     - name: Run tests
       run: bun run test
 
-    - name: Build the app
+    - name: Build the package
       run: bun run build

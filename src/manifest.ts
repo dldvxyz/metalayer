@@ -4,15 +4,15 @@
  * @module
  */
 
-import type { ValidationResult } from "./types/_shared.js";
 import type {
   ManifestImageResourceBase,
   ManifestOptions
 } from "./types/manifest.js";
+import type { ValidationResult } from "./types/shared.js";
 import { isValidUrlOrPath, normalizeUrl, validateUrl } from "./utils/url.js";
 
 /** Matches dimension strings in "WxH" format (e.g. "192x192"). */
-const SIZE_RX = /^(\d+)x(\d+)$/;
+const SIZE_RX = /^(?<width>\d+)x(?<height>\d+)$/u;
 
 /**
  * Matches a bare alphabetic word, treated as a named CSS color.
@@ -21,13 +21,13 @@ const SIZE_RX = /^(\d+)x(\d+)$/;
  * CSS named colors would be brittle (the list can grow with new specs).
  * The browser is the ultimate validator; we just catch obvious non-colors.
  */
-const NAMED_COLOR_RX = /^[a-z]+$/i;
+const NAMED_COLOR_RX = /^[a-zA-Z]+$/u;
 
 /** Matches hex color values: #RGB, #RGBA, #RRGGBB, or #RRGGBBAA. */
-const HEX_COLOR_RX = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const HEX_COLOR_RX = /^#(?:[\da-fA-F]{3,4}|[\da-fA-F]{6}|[\da-fA-F]{8})$/u;
 
-/** Matches CSS color functions: rgb(), rgba(), hsl(), hsla(). */
-const CSS_FN_COLOR_RX = /^(?:rgb|rgba|hsl|hsla)\(.+\)$/i;
+/** Matches lowercase CSS color functions: rgb(), rgba(), hsl(), hsla(). */
+const CSS_FN_COLOR_RX = /^(?:rgba?|hsla?)\(.+\)$/u;
 
 /**
  * URL schemes that browsers recognize as safe to delegate to external handlers,
@@ -64,10 +64,10 @@ const SAFELISTED_PROTOCOLS = new Set([
 ]);
 
 /** Matches custom protocol schemes of the form "web+<lowercase>". */
-const WEB_PLUS_RX = /^web\+[a-z]+$/;
+const WEB_PLUS_RX = /^web\+[a-z]+$/u;
 
 /** Matches absolute HTTP(S) URLs. Used to distinguish URL-like ids from freeform strings. */
-const ABSOLUTE_URL_RX = /^https?:\/\//;
+const ABSOLUTE_URL_RX = /^https?:\/\//u;
 
 /** Checks if an image resource is SVG by MIME type or file extension. */
 function isSvg(image: ManifestImageResourceBase): boolean {
@@ -93,7 +93,7 @@ function toSizesArray(sizes: ManifestImageResourceBase["sizes"]): string[] {
  */
 function isValidCssColor(color: string): boolean {
   if (HEX_COLOR_RX.test(color)) return true;
-  if (CSS_FN_COLOR_RX.test(color)) return true;
+  if (CSS_FN_COLOR_RX.test(color.toLowerCase())) return true;
   if (NAMED_COLOR_RX.test(color)) return true;
   return false;
 }
@@ -113,8 +113,7 @@ function validateImageResources(
   const seenSrcs = new Set<string>();
   const seenSizes = new Set<string>();
 
-  for (let i = 0; i < images.length; i++) {
-    const image = images[i];
+  for (const [i, image] of images.entries()) {
     const label = `${fieldName}[${i}]`;
 
     // Validate src
@@ -151,7 +150,7 @@ function validateImageResources(
         for (const size of sizes) {
           if (size === "any") continue;
           const match = SIZE_RX.exec(size);
-          if (!match || match[1] !== match[2]) {
+          if (!match || match.groups?.width !== match.groups?.height) {
             issues.push(
               `${label}: Icon size "${size}" must be square (e.g. "192x192").`
             );
@@ -307,9 +306,7 @@ export function validateManifest(
   if (options.shortcuts) {
     const seenShortcutNames = new Set<string>();
 
-    for (let i = 0; i < options.shortcuts.length; i++) {
-      const shortcut = options.shortcuts[i];
-
+    for (const [i, shortcut] of options.shortcuts.entries()) {
       // Duplicate shortcut names
       if (seenShortcutNames.has(shortcut.name)) {
         issues.push(`Duplicate shortcut name "${shortcut.name}".`);

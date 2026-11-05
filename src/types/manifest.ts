@@ -3,7 +3,7 @@ import type {
   NonEmptyArray,
   NonUnitaryArray,
   UrlPath
-} from "./_shared.js";
+} from "./shared.js";
 
 /**
  * Display mode for the web app.

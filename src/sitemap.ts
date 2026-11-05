@@ -4,19 +4,19 @@
  * @module
  */
 
-import type { ValidationResult } from "./types/_shared.js";
+import type { ValidationResult } from "./types/shared.js";
 import type { SitemapOptions, SitemapUrl } from "./types/sitemap.js";
 import { normalizeUrl, validateUrl } from "./utils/url.js";
 
 /** Matches YYYY-MM-DD date format. */
-const DATE_RX = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_RX = /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})$/u;
 
 /** Matches ISO 8601 datetime: YYYY-MM-DDThh:mm:ss with optional fractional seconds and timezone. */
 const DATETIME_RX =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u;
 
 /** Matches one or more trailing slashes. */
-const TRAILING_SLASHES_RX = /\/+$/;
+const TRAILING_SLASHES_RX = /\/+$/u;
 
 /**
  * Strips trailing slashes from an origin so that concatenating
@@ -46,16 +46,13 @@ function escapeXml(str: string): string {
  * and rejects dates before 1900.
  */
 function isValidDateOrDateTime(value: string): boolean {
-  let year: number, month: number, day: number;
   const isDateOnly = DATE_RX.test(value);
+  const match = (isDateOnly ? DATE_RX : DATETIME_RX).exec(value);
+  if (!match?.groups) return false;
 
-  if (isDateOnly) {
-    [year, month, day] = value.split("-").map(Number);
-  } else if (DATETIME_RX.test(value)) {
-    [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  } else {
-    return false;
-  }
+  const year = Number(match.groups.year);
+  const month = Number(match.groups.month);
+  const day = Number(match.groups.day);
 
   // Verify calendar correctness (e.g. rejects Feb 30)
   const date = new Date(year, month - 1, day);

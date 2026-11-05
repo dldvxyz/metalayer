@@ -5,14 +5,6 @@
  */
 
 export type {
-  AbsoluteUrl,
-  NonEmptyArray,
-  NonUnitaryArray,
-  UrlPath,
-  ValidationResult
-} from "./_shared.js";
-
-export type {
   CssColor,
   ImageMimeType,
   ImagePurpose,
@@ -32,12 +24,18 @@ export type {
   ManifestShortcut,
   UrlOrPath
 } from "./manifest.js";
-
 export type {
   RobotsOptions,
   RobotsRule,
   UserAgent
 } from "./robots.js";
+export type {
+  AbsoluteUrl,
+  NonEmptyArray,
+  NonUnitaryArray,
+  UrlPath,
+  ValidationResult
+} from "./shared.js";
 
 export type {
   IsoDate,
