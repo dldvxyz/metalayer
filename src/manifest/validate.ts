@@ -5,16 +5,27 @@
  */
 
 import type { ValidationResult } from "../shared/types.js";
-import { normalizeUrl, parseUrlOrPath, validateUrl } from "../shared/url.js";
+import { isValidUrlOrPath, normalizeUrl, validateUrl } from "../shared/url.js";
 import { isValidCssColor } from "./colors.js";
 import { validateImageResources } from "./images.js";
+import { isValidFileExtension, isValidMediaType } from "./mime.js";
 import { validateProtocolHandlers } from "./protocols.js";
 import type { ManifestScope } from "./scope.js";
-import { parseScope, validateScopedUrl } from "./scope.js";
-import type { ManifestDisplayOverride, ManifestOptions } from "./types.js";
+import { deriveDefaultScope, parseScope, validateScopedUrl } from "./scope.js";
+import type {
+  ManifestDisplayOverride,
+  ManifestFileHandler,
+  ManifestOptions
+} from "./types.js";
 
-/** Matches absolute HTTP(S) URLs. Used to distinguish URL-like ids from freeform strings. */
-const ABSOLUTE_URL_RX = /^https?:\/\//u;
+/** Matches a URL scheme at the start of a string, e.g. "https:" or "urn:". */
+const URL_SCHEME_RX = /^[a-z][a-z\d+.-]*:/iu;
+
+/** Matches an IPv4 address or a bracketed IPv6 address. */
+const IP_HOST_RX = /^(?:\d{1,3}(?:\.\d{1,3}){3}|\[[\da-f:.]+\])$/u;
+
+/** Chromium reads only this many scope_extensions entries. */
+const MAX_SCOPE_EXTENSIONS = 10;
 
 /** Display modes browsers recognise in `display_override`; anything else is silently skipped. */
 const DISPLAY_OVERRIDES: ReadonlySet<string> = new Set([
@@ -24,7 +35,7 @@ const DISPLAY_OVERRIDES: ReadonlySet<string> = new Set([
   "browser",
   "window-controls-overlay",
   "tabbed",
-  "borderless"
+  "unframed"
 ] satisfies ManifestDisplayOverride[]);
 
 /** Checks whether an optional string is absent, empty, or whitespace only. */
@@ -48,17 +59,26 @@ function validateNames(options: ManifestOptions, issues: string[]): void {
   }
 }
 
+/** Returns the origin of start_url when it is an absolute URL. */
+function startUrlOrigin(options: ManifestOptions): string | undefined {
+  const startUrl = options.start_url;
+  if (startUrl === undefined || startUrl.startsWith("/")) return undefined;
+  return validateUrl(startUrl)?.origin;
+}
+
 /**
- * Validates the scope and returns it parsed, or `undefined` if it is
- * absent or invalid (in which case scope checks on other members are skipped).
+ * Validates the scope member and returns it parsed, or `undefined` if it is
+ * absent or invalid (in which case scope checks on other members are
+ * skipped). A path scope is resolved against an absolute start_url.
  */
 function validateScope(
   options: ManifestOptions,
+  origin: string | undefined,
   issues: string[]
 ): ManifestScope | undefined {
   if (options.scope === undefined) return undefined;
 
-  const scope = parseScope(options.scope);
+  const scope = parseScope(options.scope, origin);
   if (!scope) {
     issues.push(
       `Invalid scope "${options.scope}". Must be an absolute http(s) URL or a path starting with "/".`
@@ -73,27 +93,15 @@ function validateScope(
   return scope;
 }
 
-/** Returns the origin of start_url when it is an absolute URL, else that of an absolute scope. */
-function baseOrigin(
-  options: ManifestOptions,
-  scope: ManifestScope | undefined
-): string | undefined {
-  if (options.start_url !== undefined && !options.start_url.startsWith("/")) {
-    const startUrl = validateUrl(options.start_url);
-    if (startUrl) return startUrl.origin;
-  }
-  return scope && !scope.isRelative ? scope.url.origin : undefined;
-}
-
 /**
- * Validates the id when it looks like a URL or path. Browsers resolve id
- * against the start_url origin and fall back to start_url when it is not
- * same-origin; it does not have to be within scope. Freeform identifiers
- * such as "my-app" are left alone.
+ * Validates the id. Browsers resolve id against the start_url origin and
+ * fall back to start_url when the result is not same-origin; it does not
+ * have to be within scope. Paths are always same-origin, and strings without
+ * a URL scheme, such as "my-app", resolve to paths.
  */
 function validateId(
   options: ManifestOptions,
-  scope: ManifestScope | undefined,
+  appOrigin: string | undefined,
   issues: string[]
 ): void {
   const { id } = options;
@@ -102,21 +110,30 @@ function validateId(
     issues.push("id must not be blank.");
     return;
   }
-  if (!(id.startsWith("/") || ABSOLUTE_URL_RX.test(id))) return;
-
-  const resolved = parseUrlOrPath(id);
-  if (!resolved) {
-    issues.push(`id "${id}" is not a valid URL or path.`);
+  if (id.startsWith("/")) {
+    if (!isValidUrlOrPath(id)) {
+      issues.push(`id "${id}" is not a valid URL or path.`);
+    }
     return;
   }
-  const origin = baseOrigin(options, scope);
-  if (
-    !id.startsWith("/") &&
-    origin !== undefined &&
-    resolved.origin !== origin
-  ) {
+  if (!URL_SCHEME_RX.test(id)) return;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(id);
+  } catch {
+    issues.push(`id "${id}" is not a valid URL.`);
+    return;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     issues.push(
-      `id "${id}" must be same-origin with start_url (${origin}); browsers otherwise fall back to start_url.`
+      `id "${id}" is a "${parsed.protocol}" URL, so it cannot be same-origin with start_url; browsers ignore it and use start_url. Use a path such as "/" instead.`
+    );
+  } else if (!validateUrl(id)) {
+    issues.push(`id "${id}" is not a valid URL or path.`);
+  } else if (appOrigin !== undefined && parsed.origin !== appOrigin) {
+    issues.push(
+      `id "${id}" must be same-origin with start_url (${appOrigin}); browsers otherwise fall back to start_url.`
     );
   }
 }
@@ -161,7 +178,42 @@ function validateColors(options: ManifestOptions, issues: string[]): void {
   }
 }
 
-/** File handler actions must be unique and within scope; their icons must be valid. */
+/** Checks the accept map of a file handler: MIME type keys mapped to file extensions. */
+function validateFileHandlerAccept(
+  handler: ManifestFileHandler,
+  label: string,
+  issues: string[]
+): void {
+  const entries = Object.entries(handler.accept);
+  if (entries.length === 0) {
+    issues.push(
+      `${label}: accept must map at least one MIME type to file extensions; browsers drop the handler otherwise.`
+    );
+    return;
+  }
+
+  for (const [type, value] of entries) {
+    if (!isValidMediaType(type)) {
+      issues.push(
+        `${label}: accept key "${type}" is not a MIME type with a registered top-level type such as "text" or "image".`
+      );
+    }
+    const extensions: readonly string[] =
+      typeof value === "string" ? [value] : value;
+    if (extensions.length === 0) {
+      issues.push(`${label}: "${type}" must list at least one file extension.`);
+    }
+    for (const extension of extensions) {
+      if (!isValidFileExtension(extension)) {
+        issues.push(
+          `${label}: extension "${extension}" for "${type}" must start with "." and be 2 to 16 characters long.`
+        );
+      }
+    }
+  }
+}
+
+/** File handler actions must be within scope; accept maps and icons must be valid. */
 function validateFileHandlers(
   options: ManifestOptions,
   scope: ManifestScope | undefined,
@@ -169,24 +221,30 @@ function validateFileHandlers(
 ): void {
   if (!options.file_handlers) return;
 
-  const seenActions = new Set<string>();
   for (const [index, handler] of options.file_handlers.entries()) {
     const label = `file_handlers[${index}]`;
     validateScopedUrl(handler.action, `${label}: action`, scope, issues);
-
-    const action = normalizeUrl(handler.action);
-    if (seenActions.has(action)) {
-      issues.push(`Duplicate action "${handler.action}" in file_handlers.`);
-    }
-    seenActions.add(action);
-
+    validateFileHandlerAccept(handler, label, issues);
     if (handler.icons) {
       validateImageResources(handler.icons, `${label}.icons`, "icon", issues);
     }
   }
 }
 
-/** The share target action must be within scope; receiving files requires a multipart POST. */
+/** Checks a share target file filter value: a file extension, a MIME type, or "*\/*". */
+function isShareTargetAccept(value: string): boolean {
+  return (
+    (value.startsWith(".") && value.length > 1) ||
+    value === "*/*" ||
+    isValidMediaType(value)
+  );
+}
+
+/**
+ * The share target action must be within scope. Receiving files requires a
+ * multipart POST, and every file filter must have a name and valid accept
+ * values; browsers drop the whole share target otherwise.
+ */
 function validateShareTarget(
   options: ManifestOptions,
   scope: ManifestScope | undefined,
@@ -197,16 +255,36 @@ function validateShareTarget(
 
   validateScopedUrl(target.action, "share_target.action", scope, issues);
 
-  const hasFiles =
-    "files" in target.params && target.params.files !== undefined;
+  const { files } = target.params;
+  if (files === undefined) return;
+
   const isMultipartPost =
-    target.method === "POST" &&
-    "enctype" in target &&
-    target.enctype === "multipart/form-data";
-  if (hasFiles && !isMultipartPost) {
+    target.method === "POST" && target.enctype === "multipart/form-data";
+  if (!isMultipartPost) {
     issues.push(
       'share_target.params.files requires method "POST" and enctype "multipart/form-data"; browsers reject the share target otherwise.'
     );
+  }
+
+  for (const [index, file] of files.entries()) {
+    const label = `share_target.params.files[${index}]`;
+    if (file.name.trim() === "") {
+      issues.push(`${label}: name must be a non-empty string.`);
+    }
+    const accepts: readonly string[] =
+      typeof file.accept === "string" ? [file.accept] : file.accept;
+    if (accepts.length === 0) {
+      issues.push(
+        `${label}: accept must list at least one MIME type or file extension.`
+      );
+    }
+    for (const accept of accepts) {
+      if (!isShareTargetAccept(accept)) {
+        issues.push(
+          `${label}: accept value "${accept}" must be a file extension such as ".png" or a MIME type such as "image/*"; browsers drop the whole share target otherwise.`
+        );
+      }
+    }
   }
 }
 
@@ -245,9 +323,13 @@ function validateDisplayOverride(
 
   const seen = new Set<string>();
   for (const mode of options.display_override) {
-    if (!DISPLAY_OVERRIDES.has(mode)) {
+    // Widened to string: untyped input may hold any value.
+    const value: string = mode;
+    if (!DISPLAY_OVERRIDES.has(value)) {
       issues.push(
-        `Unknown display_override value "${mode}". Browsers skip values they do not recognise.`
+        value === "borderless"
+          ? 'display_override value "borderless" was renamed to "unframed"; browsers no longer recognise "borderless".'
+          : `Unknown display_override value "${mode}". Browsers skip values they do not recognise.`
       );
     } else if (seen.has(mode)) {
       issues.push(`Duplicate value "${mode}" in display_override.`);
@@ -256,12 +338,21 @@ function validateDisplayOverride(
   }
 }
 
-/** scope_extensions origins must be unique bare https origins without credentials. */
+/**
+ * scope_extensions origins must be unique bare https origins without
+ * credentials, with a multi-label or IP host; Chromium reads at most ten.
+ */
 function validateScopeExtensions(
   options: ManifestOptions,
   issues: string[]
 ): void {
   if (!options.scope_extensions) return;
+
+  if (options.scope_extensions.length > MAX_SCOPE_EXTENSIONS) {
+    issues.push(
+      `scope_extensions has ${options.scope_extensions.length} entries. Chromium reads only the first ${MAX_SCOPE_EXTENSIONS}.`
+    );
+  }
 
   const seenOrigins = new Set<string>();
   for (const [index, extension] of options.scope_extensions.entries()) {
@@ -285,6 +376,11 @@ function validateScopeExtensions(
     ) {
       issues.push(
         `${label}: origin "${raw}" must be a bare origin (e.g. "https://example.com") without a path, query, fragment or credentials.`
+      );
+    }
+    if (!parsed.hostname.includes(".") && !IP_HOST_RX.test(parsed.hostname)) {
+      issues.push(
+        `${label}: origin "${raw}" has a single-label host, which Chromium ignores.`
       );
     }
     if (seenOrigins.has(parsed.origin)) {
@@ -335,20 +431,26 @@ function validateRelatedApplications(
  *
  * Checks performed:
  * - At least one of `name` or `short_name` is a non-empty string
- * - Icon and screenshot image resources (valid src, purpose tokens, size
- *   tokens, SVG/ICO rules, square icons, duplicates per purpose)
+ * - Icon and screenshot image resources (valid src and type, purpose
+ *   tokens, size tokens, SVG/ICO rules, square icons, duplicates per
+ *   purpose and format)
  * - Scope is an absolute http(s) URL or path without query or fragment
  * - start_url, shortcut URLs, file handler actions, the share target action,
- *   protocol handler URLs and the note-taking URL are valid and within scope;
- *   URLs that are in scope only because the scope lacks a trailing slash are flagged
- * - A URL-like id is same-origin with start_url
+ *   protocol handler URLs and the note-taking URL are valid and within
+ *   scope. Without a scope member, the default scope browsers derive from
+ *   start_url is used. URLs that are in scope only because the scope lacks
+ *   a trailing slash are flagged
+ * - A URL-like id is an http(s) URL on the same origin as start_url
  * - Theme and background colors are valid CSS colors
  * - Protocol handler schemes are safelisted or `web+` schemes with a `%s`
  *   placeholder in the path or query, and are registered once
- * - A share target that receives files uses a multipart POST
- * - Duplicate categories, file handler actions and related applications;
- *   unknown, redundant or duplicate display_override values
- * - scope_extensions origins are unique bare https origins
+ * - File handler accept maps and share target file filters use valid MIME
+ *   types and extensions; a share target that receives files uses a
+ *   multipart POST
+ * - Duplicate categories and related applications; unknown, redundant or
+ *   duplicate display_override values
+ * - scope_extensions origins are unique bare https origins with a
+ *   multi-label host, at most ten
  * - related_applications URLs are valid and present when preferred
  *
  * @param options - The manifest configuration to validate.
@@ -385,11 +487,22 @@ export function validateManifest(
     );
   }
 
-  const scope = validateScope(options, issues);
+  const origin = startUrlOrigin(options);
+  const explicitScope = validateScope(options, origin, issues);
+  const scope =
+    options.scope === undefined && options.start_url !== undefined
+      ? deriveDefaultScope(options.start_url, origin)
+      : explicitScope;
+  const appOrigin =
+    origin ??
+    (explicitScope && !explicitScope.isRelative
+      ? explicitScope.url.origin
+      : undefined);
+
   if (options.start_url !== undefined) {
     validateScopedUrl(options.start_url, "start_url", scope, issues);
   }
-  validateId(options, scope, issues);
+  validateId(options, appOrigin, issues);
   validateShortcuts(options, scope, issues);
   validateColors(options, issues);
   if (options.protocol_handlers) {

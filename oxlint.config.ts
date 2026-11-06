@@ -10,7 +10,7 @@ export default defineConfig({
   rules: {
     // Object keys and type members follow the order of the specs they model.
     "sort-keys": "off",
-    // Public functions are declarations: hoisted, and named in stack traces.
+    // Functions are declarations, the established style of this codebase.
     "func-style": "off",
     // Kept from the original Biome setup: single-statement `if`s without
     // braces and string concatenation are both fine in this codebase.

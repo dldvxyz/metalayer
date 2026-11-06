@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalizePercentEncoding,
   getPathname,
   hasControlCharacters,
   isValidUrlOrPath,
@@ -132,5 +133,26 @@ describe(getPathname, () => {
     ["/a//b", undefined]
   ])("returns the lowercase pathname of %j", (input, expected) => {
     expect(getPathname(input)).toBe(expected);
+  });
+});
+
+describe(canonicalizePercentEncoding, () => {
+  it.each([
+    ["/caf%c3%a9", "/caf%C3%A9"],
+    ["/café", "/caf%C3%A9"],
+    ["/%7Ejoe", "/~joe"],
+    ["/%41%2d%5F", "/A-_"],
+    ["/a%2Ab", "/a%2Ab"],
+    ["/a%24", "/a%24"],
+    ["/a%2fb", "/a%2Fb"],
+    ["/a%3Fb", "/a%3Fb"],
+    ["/a%", "/a%"],
+    ["/a%2", "/a%2"],
+    ["/%zz", "/%zz"],
+    ["/%25", "/%25"],
+    ["/😀", "/%F0%9F%98%80"],
+    ["/*.php$", "/*.php$"]
+  ])("canonicalizes %j to %j", (input, expected) => {
+    expect(canonicalizePercentEncoding(input)).toBe(expected);
   });
 });

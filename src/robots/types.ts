@@ -12,8 +12,10 @@ import type { AbsoluteUrl, NonEmptyArray, UrlPath } from "../shared/types.js";
  * `"Googlebot"`, not `"Mozilla/5.0 (compatible; Googlebot/2.1; ...)"`.
  *
  * @remarks
- * `"ChatGPT-User"` and `"Claude-User"` identify user-initiated fetches;
- * their operators state that robots.txt rules may not apply to them.
+ * `"ChatGPT-User"`, `"Claude-User"` and `"Perplexity-User"` identify
+ * user-initiated fetches. OpenAI states that robots.txt rules may not apply
+ * to ChatGPT-User, and Perplexity that Perplexity-User generally ignores
+ * them. Anthropic states that Claude-User honours robots.txt.
  *
  * @example ["*"]
  * @example ["Googlebot"]
@@ -62,9 +64,9 @@ export type UserAgent =
 /**
  * A robots.txt path pattern.
  *
- * Must start with `/`. May use `*` as a wildcard and `$` as the end-of-URL
- * anchor (RFC 9309, section 2.2.3). Spaces, `#` and a literal `$` that is
- * not at the end must be percent-encoded (`%20`, `%23`, `%24`).
+ * Must start with `/`. `*` is a wildcard, and `$` as the last character
+ * anchors the end of the URL (RFC 9309, section 2.2.3). Write a literal `*`
+ * or `$` as `%2A` or `%24`, a space as `%20` and `#` as `%23`.
  *
  * @example "/"
  * @example "/private/"
@@ -91,7 +93,7 @@ interface RobotsRuleBase {
    * Non-standard directive. Google and Yandex ignore it; Bing honours
    * positive integers and recommends values of 10 or less.
    */
-  crawlDelay?: number;
+  crawlDelay?: number | undefined;
 }
 
 /**
@@ -119,14 +121,14 @@ export type RobotsRule = RobotsRuleBase &
          * Path patterns the specified user-agents are not allowed to crawl.
          * @see {@link RobotsPath}
          */
-        disallow?: NonEmptyArray<RobotsPath>;
+        disallow?: NonEmptyArray<RobotsPath> | undefined;
       }
     | {
         /**
          * Path patterns the specified user-agents are allowed to crawl.
          * @see {@link RobotsPath}
          */
-        allow?: NonEmptyArray<RobotsPath>;
+        allow?: NonEmptyArray<RobotsPath> | undefined;
         /**
          * Path patterns the specified user-agents are not allowed to crawl.
          *
@@ -162,12 +164,13 @@ export interface RobotsOptions {
   /**
    * Absolute URL(s) of sitemap(s).
    *
-   * All URLs must be valid http(s) URLs and unique. They do not have to
-   * share the host of the robots.txt file; cross-host sitemaps are allowed.
+   * All URLs must be unique http(s) URLs without credentials or a fragment.
+   * They do not have to share the host of the robots.txt file; cross-host
+   * sitemaps are allowed.
    *
    * @example ["https://example.com/sitemap.xml"]
    */
-  sitemaps?: NonEmptyArray<AbsoluteUrl>;
+  sitemaps?: NonEmptyArray<AbsoluteUrl> | undefined;
   /**
    * Host directive naming the preferred mirror.
    *
@@ -176,5 +179,5 @@ export interface RobotsOptions {
    * instead. Still validated and emitted for compatibility.
    * @example "example.com"
    */
-  host?: string;
+  host?: string | undefined;
 }

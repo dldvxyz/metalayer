@@ -6,6 +6,7 @@
 
 import { normalizeUrl } from "../shared/url.js";
 import type { RobotsOptions } from "./types.js";
+import { encodeLineBreaks, parseHost } from "./values.js";
 
 /**
  * Generates a robots.txt string from the given options.
@@ -14,7 +15,9 @@ import type { RobotsOptions } from "./types.js";
  * Crawl-delay. Rules are separated by blank lines. Sitemap and Host
  * directives appear after all rules. Path patterns are written verbatim
  * (not normalized) to preserve the `*` and `$` pattern characters.
- * The output ends with a trailing newline.
+ * Control characters and line separators in any value are percent-encoded,
+ * so a value can never start a new line. The output ends with a trailing
+ * newline.
  *
  * @remarks
  * This function does not validate the input. Call {@link validateRobotsTxt}
@@ -39,15 +42,15 @@ export function generateRobotsTxt(options: RobotsOptions): string {
 
   for (const rule of options.rules) {
     for (const agent of rule.userAgent) {
-      lines.push(`User-agent: ${agent}`);
+      lines.push(`User-agent: ${encodeLineBreaks(agent)}`);
     }
 
     for (const path of rule.allow ?? []) {
-      lines.push(`Allow: ${path}`);
+      lines.push(`Allow: ${encodeLineBreaks(path)}`);
     }
 
     for (const path of rule.disallow ?? []) {
-      lines.push(`Disallow: ${path}`);
+      lines.push(`Disallow: ${encodeLineBreaks(path)}`);
     }
 
     if (rule.crawlDelay !== undefined) {
@@ -58,13 +61,13 @@ export function generateRobotsTxt(options: RobotsOptions): string {
   }
 
   for (const url of options.sitemaps ?? []) {
-    lines.push(`Sitemap: ${normalizeUrl(url)}`);
+    lines.push(`Sitemap: ${encodeLineBreaks(normalizeUrl(url))}`);
   }
 
   // oxlint-disable-next-line typescript/no-deprecated -- still emitted for compatibility
   const { host } = options;
   if (host !== undefined && host !== "") {
-    lines.push(`Host: ${host}`);
+    lines.push(`Host: ${encodeLineBreaks(parseHost(host) ?? host)}`);
   }
 
   return lines.join("\n").trim() + "\n";

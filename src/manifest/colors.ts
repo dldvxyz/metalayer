@@ -3,34 +3,76 @@
  *
  * Browsers parse `theme_color` and `background_color` as CSS `<color>`
  * values and accept any color that can be converted to sRGB without
- * context. This module recognises hex notation, the color functions
- * (`rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()`,
- * `color()`) with plausible arguments, and the CSS named colors.
- * Context-dependent values such as `currentcolor` are rejected.
+ * context. This module checks the forms that make sense in a manifest
+ * against the CSS Color 4 grammar: hex notation, the named colors, and the
+ * `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`, `oklch()` and
+ * `color()` functions. Context-dependent values such as `currentcolor`,
+ * system colors and relative colors are rejected.
  *
  * @module
  */
 
+import { splitAsciiWhitespace, trimAsciiWhitespace } from "../shared/text.js";
+
 /** Matches hex color values: #RGB, #RGBA, #RRGGBB, or #RRGGBBAA. */
-const HEX_COLOR_RX = /^#(?:[\da-fA-F]{3,4}|[\da-fA-F]{6}|[\da-fA-F]{8})$/u;
+const HEX_COLOR_RX = /^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/u;
 
-/** Matches a lowercase color function call and captures its name and argument list. */
-const COLOR_FUNCTION_RX =
-  /^(?<name>rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\((?<args>[^()]*)\)$/u;
+/** Matches a lowercase function call without nested parentheses. */
+const COLOR_FUNCTION_RX = /^(?<name>[a-z-]+)\((?<args>[^()]*)\)$/u;
 
-/** Matches a numeric color component: number or percentage, optional angle unit, or the `none` keyword. */
-const COLOR_COMPONENT_RX =
-  /^(?:none|[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(?:%|deg|grad|rad|turn)?)$/u;
+/** Matches a CSS number. */
+const NUMBER_RX = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?$/u;
 
-/** Matches a predefined color-space identifier for `color()` (e.g. `srgb`, `display-p3`, `xyz-d65`). */
-const COLOR_SPACE_RX = /^[a-z][a-z0-9-]*$/u;
+/** Matches a CSS percentage. */
+const PERCENTAGE_RX = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?%$/u;
 
-/** Splits color-function arguments on commas, whitespace, or the alpha slash. */
-const COLOR_ARGUMENT_SEPARATOR_RX = /\s*[,/]\s*|\s+/u;
+/** Matches a CSS angle. */
+const ANGLE_RX =
+  /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:e[+-]?\d+)?(?:deg|grad|rad|turn)$/u;
 
-/** Three channels, optionally followed by alpha. */
-const MIN_CHANNELS = 3;
-const MAX_CHANNELS = 4;
+/** Channel count of every color function. */
+const CHANNEL_COUNT = 3;
+
+/** What a channel accepts, besides `none` in the modern syntax. */
+type ChannelKind = "number-or-percentage" | "hue";
+
+const NUMBER_OR_PERCENTAGE: ChannelKind = "number-or-percentage";
+const HUE: ChannelKind = "hue";
+
+/** Channels of each function in the modern, space-separated syntax (CSS Color 4). */
+const MODERN_CHANNELS: ReadonlyMap<string, readonly ChannelKind[]> = new Map([
+  ["rgb", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["rgba", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["hsl", [HUE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["hsla", [HUE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["hwb", [HUE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["lab", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["oklab", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE]],
+  ["lch", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, HUE]],
+  ["oklch", [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, HUE]]
+]);
+
+/** Functions that also have the legacy, comma-separated syntax. */
+const LEGACY_FUNCTIONS: ReadonlySet<string> = new Set([
+  "rgb",
+  "rgba",
+  "hsl",
+  "hsla"
+]);
+
+/** Color spaces of the `color()` function (CSS Color 4). */
+const COLOR_SPACES: ReadonlySet<string> = new Set([
+  "srgb",
+  "srgb-linear",
+  "display-p3",
+  "display-p3-linear",
+  "a98-rgb",
+  "prophoto-rgb",
+  "rec2020",
+  "xyz",
+  "xyz-d50",
+  "xyz-d65"
+]);
 
 /**
  * The CSS named colors (CSS Color Module Level 4, section 6.1) plus the
@@ -189,48 +231,93 @@ const NAMED_COLORS: ReadonlySet<string> = new Set([
   "transparent"
 ]);
 
-/** Checks that every component is numeric and that there are three channels plus an optional alpha. */
-function hasValidChannels(components: readonly string[]): boolean {
-  return (
-    components.length >= MIN_CHANNELS &&
-    components.length <= MAX_CHANNELS &&
-    components.every((component) => COLOR_COMPONENT_RX.test(component))
-  );
+const isNumber = (value: string): boolean => NUMBER_RX.test(value);
+const isPercentage = (value: string): boolean => PERCENTAGE_RX.test(value);
+const isNumberOrPercentage = (value: string): boolean =>
+  isNumber(value) || isPercentage(value);
+const isHue = (value: string): boolean =>
+  isNumber(value) || ANGLE_RX.test(value);
+
+/** Checks one modern-syntax channel against what its position accepts. */
+function isModernChannel(value: string, kind: ChannelKind): boolean {
+  if (value === "none") return true;
+  return kind === HUE ? isHue(value) : isNumberOrPercentage(value);
 }
 
 /**
- * Checks whether the arguments of a color function look like a color.
- * `color()` takes a color-space identifier before its channels; the other
- * functions take channels only.
+ * Checks the legacy, comma-separated syntax: three channels and an
+ * optional alpha, with no `none`. `rgb()` channels must be all numbers or
+ * all percentages; `hsl()` saturation and lightness must be percentages.
  */
-function hasValidColorArguments(name: string, args: string): boolean {
-  const components = args.trim().split(COLOR_ARGUMENT_SEPARATOR_RX);
-  if (name !== "color") return hasValidChannels(components);
+function isLegacySyntax(name: string, args: string): boolean {
+  if (!LEGACY_FUNCTIONS.has(name)) return false;
 
-  const [space, ...channels] = components;
+  const parts = args.split(",").map(trimAsciiWhitespace);
+  if (parts.length !== CHANNEL_COUNT && parts.length !== CHANNEL_COUNT + 1) {
+    return false;
+  }
+  const [first = "", second = "", third = "", alpha] = parts;
+  if (alpha !== undefined && !isNumberOrPercentage(alpha)) return false;
+
+  if (name.startsWith("rgb")) {
+    const channels = [first, second, third];
+    return channels.every(isNumber) || channels.every(isPercentage);
+  }
+  return isHue(first) && isPercentage(second) && isPercentage(third);
+}
+
+/**
+ * Checks the modern, space-separated syntax: three channels, then
+ * optionally "/" and an alpha. `color()` takes a color space first.
+ */
+function isModernSyntax(name: string, args: string): boolean {
+  const [channelPart = "", alphaPart, ...extra] = args.split("/");
+  if (extra.length > 0) return false;
+
+  if (alphaPart !== undefined) {
+    const alpha = splitAsciiWhitespace(alphaPart);
+    if (
+      alpha.length !== 1 ||
+      !isModernChannel(alpha[0] ?? "", NUMBER_OR_PERCENTAGE)
+    ) {
+      return false;
+    }
+  }
+
+  let channels = splitAsciiWhitespace(channelPart);
+  let kinds = MODERN_CHANNELS.get(name);
+  if (name === "color") {
+    const [space = "", ...rest] = channels;
+    if (!COLOR_SPACES.has(space)) return false;
+    channels = rest;
+    kinds = [NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE, NUMBER_OR_PERCENTAGE];
+  }
+
   return (
-    space !== undefined &&
-    COLOR_SPACE_RX.test(space) &&
-    hasValidChannels(channels)
+    kinds !== undefined &&
+    channels.length === CHANNEL_COUNT &&
+    channels.every((channel, index) =>
+      isModernChannel(channel, kinds[index] ?? NUMBER_OR_PERCENTAGE)
+    )
   );
 }
 
 /**
  * Checks whether a string is a CSS color that browsers accept in a
- * manifest: hex notation, a color function with plausible arguments, or
- * a CSS named color (case-insensitive).
+ * manifest: hex notation, a color function in valid CSS Color 4 syntax,
+ * or a CSS named color (case-insensitive).
  *
  * @param color - The color string to check.
  * @returns `true` if the string is a recognised CSS color.
  */
 export function isValidCssColor(color: string): boolean {
-  const trimmed = color.trim();
-  if (HEX_COLOR_RX.test(trimmed)) return true;
+  const value = trimAsciiWhitespace(color).toLowerCase();
+  if (HEX_COLOR_RX.test(value) || NAMED_COLORS.has(value)) return true;
 
-  const lower = trimmed.toLowerCase();
-  if (NAMED_COLORS.has(lower)) return true;
-
-  const groups = COLOR_FUNCTION_RX.exec(lower)?.groups;
+  const groups = COLOR_FUNCTION_RX.exec(value)?.groups;
   if (groups?.name === undefined || groups.args === undefined) return false;
-  return hasValidColorArguments(groups.name, groups.args);
+
+  return groups.args.includes(",")
+    ? isLegacySyntax(groups.name, groups.args)
+    : isModernSyntax(groups.name, groups.args);
 }

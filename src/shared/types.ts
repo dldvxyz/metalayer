@@ -2,8 +2,9 @@
  * Array that is guaranteed to contain at least one element.
  *
  * Used throughout the API to enforce non-empty collections at the type level.
- * The tuple is `readonly`, so `as const` and frozen arrays are accepted.
- * The library never mutates its inputs.
+ * The tuple is `readonly`, so `as const` tuples are accepted (including
+ * `Object.freeze([...] as const)`); arrays typed `readonly T[]` are not,
+ * because they may be empty. The library never mutates its inputs.
  *
  * @example
  * const agents: NonEmptyArray<string> = ["Googlebot"]; // OK
@@ -15,7 +16,7 @@ export type NonEmptyArray<T> = readonly [T, ...T[]];
  * Array that is guaranteed to contain at least two elements.
  *
  * Used where a single-element array would be semantically meaningless
- * (e.g. ICO files with multiple sizes, display_override lists).
+ * (e.g. ICO files with multiple sizes, launch_handler client_mode lists).
  *
  * @remarks
  * Named "non-unitary" to mean "not a single-element array."

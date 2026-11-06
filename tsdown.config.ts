@@ -9,6 +9,9 @@ export default defineConfig({
   dts: true,
   clean: true,
   minify: true,
-  publint: true,
-  attw: true
+  // Fail the build on any packaging problem, for every resolution mode
+  // (node10, node16 CJS and ESM, bundler).
+  publint: { strict: true },
+  attw: { profile: "strict", level: "error" },
+  failOnWarn: "ci-only"
 });

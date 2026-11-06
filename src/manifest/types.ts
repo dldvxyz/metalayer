@@ -21,15 +21,16 @@ export type ManifestDisplay =
 
 /**
  * Display mode override: the standard modes plus the incubating
- * `"window-controls-overlay"`, `"tabbed"` and `"borderless"` modes.
- * Browsers silently skip values they do not recognise, so
- * {@link validateManifest} rejects anything outside this list.
+ * `"window-controls-overlay"`, `"tabbed"` and `"unframed"` modes
+ * (`"unframed"` was previously called `"borderless"`). Browsers silently
+ * skip values they do not recognise, so {@link validateManifest} rejects
+ * anything outside this list.
  */
 export type ManifestDisplayOverride =
   | ManifestDisplay
   | "window-controls-overlay"
   | "tabbed"
-  | "borderless";
+  | "unframed";
 
 /**
  * Preferred screen orientation for the web app.
@@ -53,8 +54,22 @@ export type ManifestOrientation =
 /** A single purpose token for a manifest image resource. */
 export type ImagePurposeToken = "any" | "maskable" | "monochrome";
 
+/** Two different purpose tokens, space-separated. */
+type ImagePurposePair = {
+  [First in ImagePurposeToken]: `${First} ${Exclude<ImagePurposeToken, First>}`;
+}[ImagePurposeToken];
+
+/** Three different purpose tokens, space-separated. */
+type ImagePurposeTriple = {
+  [First in ImagePurposeToken]: {
+    [
+      Second in Exclude<ImagePurposeToken, First>
+    ]: `${First} ${Second} ${Exclude<ImagePurposeToken, First | Second>}`;
+  }[Exclude<ImagePurposeToken, First>];
+}[ImagePurposeToken];
+
 /**
- * Purpose of a manifest image resource: one or more unique tokens,
+ * Purpose of a manifest image resource: one or more different tokens,
  * space-separated (e.g. `"any maskable"`).
  *
  * Browsers ignore unknown tokens and drop an icon whose tokens are all
@@ -62,8 +77,8 @@ export type ImagePurposeToken = "any" | "maskable" | "monochrome";
  */
 export type ImagePurpose =
   | ImagePurposeToken
-  | `${ImagePurposeToken} ${ImagePurposeToken}`
-  | `${ImagePurposeToken} ${ImagePurposeToken} ${ImagePurposeToken}`;
+  | ImagePurposePair
+  | ImagePurposeTriple;
 
 /** MIME type of a manifest image resource. Common types are provided as autocomplete suggestions. */
 export type ImageMimeType =
@@ -84,7 +99,7 @@ export type ImageMimeType =
  * (checked by {@link validateManifest}, which also enforces that icon
  * sizes are square).
  */
-export type ImageSize = `${number}x${number}`;
+export type ImageSize = `${number}${"x" | "X"}${number}`;
 
 /**
  * CSS color value.
@@ -139,13 +154,13 @@ export interface ManifestImageResourceBase {
   /** URL or path to the image file. */
   src: UrlOrPath;
   /**
-   * Image dimensions. Format depends on the resource type.
-   * An array is serialized as the manifest's space-separated string
-   * (e.g. `["16x16", "32x32"]` becomes `"16x16 32x32"`).
+   * Image dimensions. Format depends on the resource type. Give multiple
+   * sizes as an array; it is serialized as the manifest's space-separated
+   * string (e.g. `["16x16", "32x32"]` becomes `"16x16 32x32"`).
    */
-  sizes?: "any" | ImageSize | NonUnitaryArray<ImageSize>;
+  sizes?: "any" | ImageSize | NonUnitaryArray<ImageSize> | undefined;
   /** MIME type of the image (e.g. `"image/png"`). */
-  type?: ImageMimeType;
+  type?: ImageMimeType | undefined;
 }
 
 /** An image resource in the manifest (used for icons). */
@@ -160,12 +175,12 @@ export interface ManifestImageResource extends ManifestImageResourceBase {
    * @example "192x192"
    * @example ["16x16", "32x32"] // ICO only
    */
-  sizes?: "any" | ImageSize | NonUnitaryArray<ImageSize>;
+  sizes?: "any" | ImageSize | NonUnitaryArray<ImageSize> | undefined;
   /**
    * Intended purpose of the image.
    * @default "any"
    */
-  purpose?: ImagePurpose;
+  purpose?: ImagePurpose | undefined;
 }
 
 /** Platforms and stores defined by the Web App Manifest "Application Information" spec. */
@@ -195,13 +210,13 @@ export interface ManifestScreenshot extends ManifestImageResourceBase {
    *
    * @example "1280x720"
    */
-  sizes?: "any" | ImageSize;
+  sizes?: "any" | ImageSize | undefined;
   /** Accessible description of the screenshot. */
-  label?: string;
+  label?: string | undefined;
   /** Platform or store the screenshot applies to (e.g. `"ios"`, `"android"`, `"windows"`). */
-  platform?: ScreenshotPlatform;
+  platform?: ScreenshotPlatform | undefined;
   /** Form factor: `"narrow"` for mobile, `"wide"` for desktop/tablet. */
-  form_factor?: "narrow" | "wide";
+  form_factor?: "narrow" | "wide" | undefined;
 }
 
 /** A shortcut entry for the manifest app. */
@@ -209,13 +224,13 @@ export interface ManifestShortcut {
   /** Human-readable label for the shortcut. */
   name: string;
   /** Short version of the name, used where space is limited. */
-  short_name?: string;
+  short_name?: string | undefined;
   /** Description of what the shortcut does. */
-  description?: string;
+  description?: string | undefined;
   /** URL that opens when the shortcut is activated. Must be within the manifest scope. */
   url: UrlOrPath;
   /** Icons representing this shortcut. */
-  icons?: NonEmptyArray<ManifestImageResource>;
+  icons?: NonEmptyArray<ManifestImageResource> | undefined;
 }
 
 /** A cryptographic fingerprint identifying a related native application. */
@@ -231,9 +246,9 @@ interface ManifestRelatedApplicationBase {
   /** Application platform (e.g. `"play"`, `"itunes"`, `"windows"`). */
   platform: string;
   /** Minimum version of the application considered related. */
-  min_version?: string;
+  min_version?: string | undefined;
   /** Fingerprints used to verify the application. */
-  fingerprints?: NonEmptyArray<ManifestFingerprint>;
+  fingerprints?: NonEmptyArray<ManifestFingerprint> | undefined;
 }
 
 /**
@@ -248,11 +263,11 @@ export type ManifestRelatedApplication = ManifestRelatedApplicationBase &
         /** URL to the application's store listing. */
         url: AbsoluteUrl;
         /** Platform-specific application identifier (e.g. a package name or store ID). */
-        id?: string;
+        id?: string | undefined;
       }
     | {
         /** URL to the application's store listing. */
-        url?: AbsoluteUrl;
+        url?: AbsoluteUrl | undefined;
         /** Platform-specific application identifier (e.g. a package name or store ID). */
         id: string;
       }
@@ -282,7 +297,7 @@ export interface ManifestFileHandler {
    */
   action: UrlOrPath;
   /** Human-readable name of the file type, shown in file dialogs. */
-  name?: string;
+  name?: string | undefined;
   /**
    * Map of MIME types to accepted file extension(s).
    *
@@ -293,23 +308,23 @@ export interface ManifestFileHandler {
     `.${string}` | NonEmptyArray<`.${string}`>
   >;
   /** Icons representing the file type. */
-  icons?: NonEmptyArray<ManifestImageResource>;
+  icons?: NonEmptyArray<ManifestImageResource> | undefined;
   /**
    * Whether multiple files open in one client (`"single-client"`) or one
    * client per file (`"multiple-clients"`).
    * @default "single-client"
    */
-  launch_type?: "single-client" | "multiple-clients";
+  launch_type?: "single-client" | "multiple-clients" | undefined;
 }
 
 /** Parameters that can be shared to the target app. */
 export interface ShareTargetParams {
   /** Name of the query parameter for the shared title. */
-  title?: string;
+  title?: string | undefined;
   /** Name of the query parameter for the shared text. */
-  text?: string;
+  text?: string | undefined;
   /** Name of the query parameter for the shared URL. */
-  url?: string;
+  url?: string | undefined;
 }
 
 /** A MIME type (`"image/png"`, `"image/*"`) or file extension (`".png"`) accepted by a share target. */
@@ -328,9 +343,9 @@ export interface ManifestShareTargetGet {
   /** URL that handles the share action. Must be within the manifest scope. */
   action: UrlOrPath;
   /** HTTP method. Omit or set to `"GET"` for query-string-based sharing. */
-  method?: "GET";
-  /** Parameters to include in the share URL's query string. */
-  params: ShareTargetParams;
+  method?: "GET" | undefined;
+  /** Parameters to include in the share URL's query string. Files need a multipart POST. */
+  params: ShareTargetParams & { files?: undefined };
 }
 
 /** Share target using HTTP POST with a URL-encoded body (no files). */
@@ -343,9 +358,9 @@ export interface ManifestShareTargetPostUrlEncoded {
    * Encoding type for the POST body.
    * @default "application/x-www-form-urlencoded"
    */
-  enctype?: "application/x-www-form-urlencoded";
-  /** Parameters to include in the POST body. */
-  params: ShareTargetParams;
+  enctype?: "application/x-www-form-urlencoded" | undefined;
+  /** Parameters to include in the POST body. Files need `enctype: "multipart/form-data"`. */
+  params: ShareTargetParams & { files?: undefined };
 }
 
 /** Share target using HTTP POST with a multipart body, which is required to receive files. */
@@ -359,7 +374,7 @@ export interface ManifestShareTargetPostMultipart {
   /** Parameters to include in the POST body, optionally including files. */
   params: ShareTargetParams & {
     /** Files the share target accepts. */
-    files?: NonEmptyArray<ShareTargetFile>;
+    files?: NonEmptyArray<ShareTargetFile> | undefined;
   };
 }
 
@@ -402,7 +417,8 @@ export type LaunchHandlerClientMode =
 export interface ManifestLaunchHandler {
   client_mode?:
     | LaunchHandlerClientMode
-    | NonUnitaryArray<LaunchHandlerClientMode>;
+    | NonUnitaryArray<LaunchHandlerClientMode>
+    | undefined;
 }
 
 /**
@@ -413,7 +429,7 @@ export interface ManifestLaunchHandler {
  */
 export interface ManifestScopeExtension {
   /** Kind of extension. Only `"origin"` is currently defined and it is emitted automatically. */
-  type?: "origin";
+  type?: "origin" | undefined;
   /** Bare https origin (scheme and host, no path) to extend the scope to. */
   origin: `https://${string}`;
 }
@@ -434,14 +450,14 @@ export interface ManifestNoteTaking {
  */
 interface ManifestOptionsBase {
   /** A human-readable description of the application. */
-  description?: string;
+  description?: string | undefined;
   /**
    * URL that loads when the app is launched.
    * Must be within the manifest scope (if set).
    *
    * @example "/home"
    */
-  start_url?: UrlOrPath;
+  start_url?: UrlOrPath | undefined;
   /**
    * Navigation scope of the app. Pages outside this scope are opened in a browser tab.
    *
@@ -454,7 +470,7 @@ interface ManifestOptionsBase {
    * @example "/"
    * @example "https://example.com/app/"
    */
-  scope?: UrlOrPath;
+  scope?: UrlOrPath | undefined;
   /**
    * Unique identifier for the application, resolved against the
    * `start_url` origin. Must be same-origin with `start_url`; it does not
@@ -463,45 +479,45 @@ interface ManifestOptionsBase {
    * @example "/"
    * @example "https://example.com/?app=myapp"
    */
-  id?: string;
+  id?: string | undefined;
   /**
    * Preferred display mode for the application.
    * @default "browser"
    */
-  display?: ManifestDisplay;
+  display?: ManifestDisplay | undefined;
   /**
    * Ordered list of preferred display modes. The browser uses the first supported mode.
    * Should not contain only the same value as `display`.
    */
-  display_override?: NonEmptyArray<ManifestDisplayOverride>;
+  display_override?: NonEmptyArray<ManifestDisplayOverride> | undefined;
   /** Default screen orientation for the application. */
-  orientation?: ManifestOrientation;
+  orientation?: ManifestOrientation | undefined;
   /**
    * Default theme color for the application (e.g. browser toolbar).
    * @example "#4285f4"
    */
-  theme_color?: CssColor;
+  theme_color?: CssColor | undefined;
   /**
    * Expected background color of the application (shown during load).
    * @example "#ffffff"
    */
-  background_color?: CssColor;
+  background_color?: CssColor | undefined;
   /** Icons representing the application in various contexts. */
-  icons?: NonEmptyArray<ManifestImageResource>;
+  icons?: NonEmptyArray<ManifestImageResource> | undefined;
   /** Screenshots for use in app stores and install prompts. */
-  screenshots?: NonEmptyArray<ManifestScreenshot>;
+  screenshots?: NonEmptyArray<ManifestScreenshot> | undefined;
   /** App shortcuts shown in the OS context menu (e.g. long-press on icon). */
-  shortcuts?: NonEmptyArray<ManifestShortcut>;
+  shortcuts?: NonEmptyArray<ManifestShortcut> | undefined;
   /**
    * Categories the application belongs to, used as hints for app stores.
    * @example ["productivity", "utilities"]
    */
-  categories?: NonEmptyArray<string>;
+  categories?: NonEmptyArray<string> | undefined;
   /**
    * International Age Rating Coalition certificate ID.
    * @example "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7"
    */
-  iarc_rating_id?: string;
+  iarc_rating_id?: string | undefined;
   /**
    * Primary language of the manifest values (BCP 47 tag).
    *
@@ -510,28 +526,28 @@ interface ManifestOptionsBase {
    *
    * @example "en-US"
    */
-  lang?: string;
+  lang?: string | undefined;
   /**
    * Base text direction.
    * @default "auto"
    */
-  dir?: "ltr" | "rtl" | "auto";
+  dir?: "ltr" | "rtl" | "auto" | undefined;
   /** Hint that related native applications are preferred over the web app. */
-  prefer_related_applications?: boolean;
+  prefer_related_applications?: boolean | undefined;
   /** Native applications related to this web app. */
-  related_applications?: NonEmptyArray<ManifestRelatedApplication>;
+  related_applications?: NonEmptyArray<ManifestRelatedApplication> | undefined;
   /** Custom URL protocol handlers the app can handle. */
-  protocol_handlers?: NonEmptyArray<ManifestProtocolHandler>;
+  protocol_handlers?: NonEmptyArray<ManifestProtocolHandler> | undefined;
   /** File types the app can open. */
-  file_handlers?: NonEmptyArray<ManifestFileHandler>;
+  file_handlers?: NonEmptyArray<ManifestFileHandler> | undefined;
   /** Enables the app to receive shared data from other apps. */
-  share_target?: ManifestShareTarget;
+  share_target?: ManifestShareTarget | undefined;
   /** Controls how the app is launched (e.g. reuse existing window). */
-  launch_handler?: ManifestLaunchHandler;
+  launch_handler?: ManifestLaunchHandler | undefined;
   /** Additional origins that are considered part of the app scope. */
-  scope_extensions?: NonEmptyArray<ManifestScopeExtension>;
+  scope_extensions?: NonEmptyArray<ManifestScopeExtension> | undefined;
   /** Note-taking integration. */
-  note_taking?: ManifestNoteTaking;
+  note_taking?: ManifestNoteTaking | undefined;
 }
 
 /**
@@ -543,6 +559,6 @@ interface ManifestOptionsBase {
  */
 export type ManifestOptions = ManifestOptionsBase &
   (
-    | { name: string; short_name?: string }
-    | { name?: string; short_name: string }
+    | { name: string; short_name?: string | undefined }
+    | { name?: string | undefined; short_name: string }
   );

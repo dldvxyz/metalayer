@@ -4,53 +4,47 @@
  * @module
  */
 
+import { utf8ByteLength } from "../shared/text.js";
 import type { ValidationResult } from "../shared/types.js";
-import { hasControlCharacters, validateUrl } from "../shared/url.js";
+import {
+  canonicalizePercentEncoding,
+  hasControlCharacters
+} from "../shared/url.js";
+import { generateRobotsTxt } from "./generate.js";
 import type { RobotsOptions, RobotsRule } from "./types.js";
+import { hasLineBreakOrControl, parseHost } from "./values.js";
 
 /**
- * RFC 9309 (section 2.2.1) product token: letters, "_" and "-". Digits are
- * tolerated as well because widely deployed crawlers use them (e.g. "360Spider").
+ * Product token. RFC 9309 (section 2.2.1) allows letters, "_" and "-";
+ * digits and "." are tolerated as well because deployed crawlers use them
+ * (e.g. "360Spider", "archive.org_bot").
  */
-const PRODUCT_TOKEN_RX = /^[A-Za-z0-9_-]+$/u;
+const PRODUCT_TOKEN_RX = /^[A-Za-z\d._-]+$/u;
 
-/** Matches a percent-encoded octet and captures its two hex digits. */
-const PERCENT_OCTET_RX = /%(?<hex>[0-9a-fA-F]{2})/gu;
-
-/** Matches a single RFC 3986 unreserved character. */
-const UNRESERVED_CHAR_RX = /^[A-Za-z0-9._~-]$/u;
-
-/** Matches any non-ASCII code point. */
-const NON_ASCII_RX = /[\u0080-\u{10FFFF}]/gu;
-
-/** Matches an optional http(s) scheme prefix on a host value. */
-const HOST_SCHEME_RX = /^https?:\/\//u;
+/** Matches an unpaired UTF-16 surrogate, which cannot be encoded as UTF-8. */
+const LONE_SURROGATE_RX = /\p{Cs}/u;
 
 /**
- * Canonicalizes a robots.txt path pattern for comparison, following
- * RFC 9309 section 2.2.2: non-ASCII characters are percent-encoded as
- * UTF-8, percent-encoded unreserved ASCII characters are decoded, and the
- * hex digits of the remaining escapes are uppercased.
- *
- * `*`, `$` and `?` are left untouched because they are matched verbatim
- * by crawlers; the WHATWG URL parser must not be used here because it
- * drops a trailing "?" and resolves ".." segments, neither of which a
- * robots.txt matcher does.
- *
- * @param pattern - The path pattern to canonicalize.
- * @returns The canonical form, or the pattern unchanged if it cannot be encoded.
+ * Google ignores robots.txt content after 500 KiB, the minimum parsing
+ * limit that RFC 9309 (section 2.5) sets.
  */
-function canonicalizePattern(pattern: string): string {
-  try {
-    return pattern
-      .replaceAll(NON_ASCII_RX, (char) => encodeURIComponent(char))
-      .replaceAll(PERCENT_OCTET_RX, (match, hex: string) => {
-        const char = String.fromCodePoint(Number.parseInt(hex, 16));
-        return UNRESERVED_CHAR_RX.test(char) ? char : match.toUpperCase();
-      });
-  } catch {
-    return pattern;
+const MAX_ROBOTS_BYTES = 500 * 1024;
+
+/** How a rule is referred to in issue messages. */
+interface RuleName {
+  /** Used mid-sentence, e.g. "for user agent Googlebot". */
+  label: string;
+  /** Used at the start of a sentence, e.g. "The rule for user agent Googlebot". */
+  subject: string;
+}
+
+/** Names a rule after its user agents, or after its position when it has none. */
+function nameRule(rule: RobotsRule, index: number): RuleName {
+  if (rule.userAgent.length === 0) {
+    return { label: `rule #${index + 1}`, subject: `Rule #${index + 1}` };
   }
+  const label = `user agent ${rule.userAgent.join(", ")}`;
+  return { label, subject: `The rule for ${label}` };
 }
 
 /**
@@ -61,8 +55,11 @@ function canonicalizePattern(pattern: string): string {
  */
 function getPathPatternIssue(path: string): string | undefined {
   if (!path.startsWith("/")) return 'must start with "/"';
-  if (hasControlCharacters(path)) {
-    return "contains a control character such as a line break";
+  if (hasLineBreakOrControl(path)) {
+    return "contains a control character or line break";
+  }
+  if (LONE_SURROGATE_RX.test(path)) {
+    return "contains an unpaired surrogate, which is not valid Unicode";
   }
   if (path.includes(" ")) return 'contains a space. Percent-encode it as "%20"';
   if (path.includes("#")) {
@@ -76,7 +73,7 @@ function getPathPatternIssue(path: string): string | undefined {
 }
 
 /**
- * Checks a user-agent value against the RFC 9309 product-token grammar.
+ * Checks a user-agent value against the product-token grammar.
  *
  * @param agent - The user-agent value to check.
  * @returns A description of the problem, or `undefined` if the value is valid.
@@ -85,7 +82,7 @@ function getUserAgentIssue(agent: string): string | undefined {
   if (agent === "*") return undefined;
   if (agent.length === 0) return "is empty";
   if (!PRODUCT_TOKEN_RX.test(agent)) {
-    return 'is not a valid product token. Use letters, digits, "_" and "-" only (e.g. "Googlebot"), not a full User-Agent header string';
+    return 'is not a valid product token. Use letters, digits, ".", "_" and "-" only (e.g. "Googlebot"), not a full User-Agent header string';
   }
   return undefined;
 }
@@ -96,13 +93,13 @@ function getUserAgentIssue(agent: string): string | undefined {
  */
 function validateUserAgents(
   agents: readonly string[],
-  label: string,
+  name: RuleName,
   seenAgents: Set<string>,
   issues: string[]
 ): void {
   if (agents.length === 0) {
     issues.push(
-      `${label} has no user agents. Use ["*"] to target all crawlers.`
+      `${name.subject} has no user agents. Use ["*"] to target all crawlers.`
     );
     return;
   }
@@ -129,11 +126,10 @@ function validateUserAgents(
     seenAgents.add(key);
   }
 
-  // Check that wildcard "*" is not mixed with specific agents in the same rule
   const specific = agents.filter((agent) => agent !== "*");
   if (specific.length > 0 && specific.length < agents.length) {
     issues.push(
-      `Rule has wildcard "*" mixed with specific user agents: ${specific.join(", ")}. Use "*" alone or list specific agents without "*".`
+      `${name.subject} mixes the wildcard "*" with specific user agents (${specific.join(", ")}). Use "*" alone or list the specific agents without "*".`
     );
   }
 }
@@ -144,7 +140,7 @@ function validateUserAgents(
  */
 function validatePaths(
   rule: RobotsRule,
-  label: string,
+  name: RuleName,
   issues: string[]
 ): void {
   const allows: readonly string[] = rule.allow ?? [];
@@ -152,7 +148,7 @@ function validatePaths(
 
   if (allows.length === 0 && disallows.length === 0) {
     issues.push(
-      `The rule for ${label} has neither Allow nor Disallow paths. An empty group implicitly allows everything.`
+      `${name.subject} has neither Allow nor Disallow paths. Crawlers merge a group without rules into the next group; use allow: ["/"] to allow everything.`
     );
     return;
   }
@@ -165,21 +161,26 @@ function validatePaths(
       const problem = getPathPatternIssue(path);
       if (problem !== undefined) {
         issues.push(
-          `${directive} path ${JSON.stringify(path)} for ${label} ${problem}.`
+          `${directive} path ${JSON.stringify(path)} for ${name.label} ${problem}.`
         );
       }
     }
   }
 
-  // Identical patterns in both lists are ambiguous. RFC 9309 resolves the tie
-  // in favour of Allow, which is rarely what the author meant.
-  const canonicalDisallows = new Set(disallows.map(canonicalizePattern));
-  const overlapping = allows.filter((path) =>
-    canonicalDisallows.has(canonicalizePattern(path))
-  );
-  if (overlapping.length > 0) {
+  // Equivalent patterns in both lists are ambiguous. RFC 9309 resolves the
+  // tie in favour of Allow, which is rarely what the author meant.
+  const disallowsByKey = new Map<string, string>();
+  for (const path of disallows) {
+    const key = canonicalizePercentEncoding(path);
+    if (!disallowsByKey.has(key)) disallowsByKey.set(key, path);
+  }
+  for (const allow of allows) {
+    const disallow = disallowsByKey.get(canonicalizePercentEncoding(allow));
+    if (disallow === undefined) continue;
     issues.push(
-      `Path(s) ${overlapping.map((path) => JSON.stringify(path)).join(", ")} appear in both Allow and Disallow for ${label}.`
+      disallow === allow
+        ? `Path ${JSON.stringify(allow)} appears in both Allow and Disallow for ${name.label}.`
+        : `Allow ${JSON.stringify(allow)} and Disallow ${JSON.stringify(disallow)} are the same pattern for ${name.label}.`
     );
   }
 }
@@ -191,14 +192,10 @@ function validateRule(
   seenAgents: Set<string>,
   issues: string[]
 ): void {
-  const agents = rule.userAgent;
-  const label =
-    agents.length > 0
-      ? `user agent ${agents.join(", ")}`
-      : `Rule #${index + 1}`;
+  const name = nameRule(rule, index);
 
-  validateUserAgents(agents, label, seenAgents, issues);
-  validatePaths(rule, label, issues);
+  validateUserAgents(rule.userAgent, name, seenAgents, issues);
+  validatePaths(rule, name, issues);
 
   // Crawl delay must be a positive whole number of seconds
   if (
@@ -206,48 +203,55 @@ function validateRule(
     (!Number.isSafeInteger(rule.crawlDelay) || rule.crawlDelay <= 0)
   ) {
     issues.push(
-      `Crawl delay ${rule.crawlDelay} for ${label} must be a positive integer number of seconds.`
+      `Crawl delay ${rule.crawlDelay} for ${name.label} must be a positive integer number of seconds.`
     );
-  }
-}
-
-/** Validates sitemap URLs: must be valid http(s) URLs, no duplicates after normalization. */
-function validateSitemaps(sitemaps: readonly string[], issues: string[]): void {
-  const seen = new Set<string>();
-  for (const rawUrl of sitemaps) {
-    const parsed = validateUrl(rawUrl);
-    if (!parsed) {
-      issues.push(`Sitemap URL "${rawUrl}" is not a valid absolute URL.`);
-      continue;
-    }
-    if (seen.has(parsed.href)) {
-      issues.push(`Duplicate sitemap URL "${parsed.href}".`);
-    }
-    seen.add(parsed.href);
   }
 }
 
 /**
- * Validates the Host directive: a bare hostname, optionally prefixed with
- * an http(s) scheme, without path, query, fragment or credentials.
- * Internationalized domain names are accepted in Unicode or Punycode form.
+ * Checks a sitemap URL for a Sitemap directive.
+ *
+ * @param rawUrl - The URL as configured.
+ * @returns A description of the problem, or `undefined` if the URL is valid.
  */
-function validateHost(host: string, issues: string[]): void {
-  const parsed = validateUrl(
-    HOST_SCHEME_RX.test(host) ? host : "https://" + host
-  );
-  const isBareHost =
-    parsed !== undefined &&
-    parsed.pathname === "/" &&
-    !host.endsWith("/") &&
-    parsed.search === "" &&
-    parsed.hash === "" &&
-    parsed.username === "" &&
-    parsed.password === "";
-  if (!isBareHost) {
-    issues.push(
-      `Host "${host}" is not a valid hostname. Provide a bare hostname such as "example.com", optionally prefixed with "https://".`
-    );
+function getSitemapIssue(rawUrl: string): string | undefined {
+  if (hasControlCharacters(rawUrl)) {
+    return "contains a control character such as a line break";
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return "is not a valid URL";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return "must use http or https";
+  }
+  if (parsed.pathname.includes("//")) return 'has "//" in its path';
+  if (parsed.username !== "" || parsed.password !== "") {
+    return "must not contain credentials; robots.txt is public";
+  }
+  if (rawUrl.includes("#")) {
+    return 'contains "#", which starts a comment in robots.txt';
+  }
+  return undefined;
+}
+
+/** Validates sitemap URLs and reports duplicates after normalization. */
+function validateSitemaps(sitemaps: readonly string[], issues: string[]): void {
+  const seen = new Set<string>();
+  for (const rawUrl of sitemaps) {
+    const problem = getSitemapIssue(rawUrl);
+    if (problem !== undefined) {
+      issues.push(`Sitemap URL ${JSON.stringify(rawUrl)} ${problem}.`);
+      continue;
+    }
+    const { href } = new URL(rawUrl);
+    const key = canonicalizePercentEncoding(href);
+    if (seen.has(key)) {
+      issues.push(`Duplicate sitemap URL "${href}".`);
+    }
+    seen.add(key);
   }
 }
 
@@ -255,16 +259,20 @@ function validateHost(host: string, issues: string[]): void {
  * Validates a robots.txt configuration for common mistakes.
  *
  * Checks performed:
- * - Each rule has at least one user agent and at least one Allow or Disallow path
- * - User agents are valid product tokens (RFC 9309, section 2.2.1)
+ * - At least one rule; each rule has at least one user agent and at least
+ *   one Allow or Disallow path
+ * - User agents are product tokens: RFC 9309 (section 2.2.1) letters, "_"
+ *   and "-", plus the digits and "." that deployed crawlers use
  * - Wildcard `"*"` is not mixed with specific agents in the same rule
  * - No duplicate user agents within a rule or across rules (case-insensitive)
- * - Path patterns start with `/` and contain no control characters, spaces,
- *   `#` (starts a comment) or a `$` before the end (RFC 9309, section 2.2.3)
- * - No identical patterns in Allow and Disallow within the same rule
+ * - Path patterns start with `/` and contain no control characters, line
+ *   separators, invalid Unicode, spaces, `#` (starts a comment) or a `$`
+ *   before the end (RFC 9309, section 2.2.3)
+ * - No equivalent patterns in Allow and Disallow within the same rule
  * - Crawl delay is a positive integer
- * - Sitemap URLs (if provided) are valid absolute http(s) URLs and unique
- * - Host (if provided) is a bare hostname
+ * - Sitemap URLs (if provided) are unique http(s) URLs without credentials or fragments
+ * - Host (if provided) is a domain name, optionally with an http(s) scheme and a port
+ * - The generated file stays within the 500 KiB that Google reads
  *
  * @param options - The robots.txt configuration to validate.
  * @returns `{ valid: true, options }` on success, or
@@ -292,9 +300,26 @@ export function validateRobotsTxt(
   }
 
   if (options.sitemaps) validateSitemaps(options.sitemaps, issues);
+
+  // An empty host is treated as absent, as the generator does.
   // oxlint-disable-next-line typescript/no-deprecated -- still supported for compatibility
-  if (options.host !== undefined) validateHost(options.host, issues);
+  const { host } = options;
+  if (host !== undefined && host !== "" && parseHost(host) === undefined) {
+    issues.push(
+      `Host ${JSON.stringify(host)} is not a valid hostname. Provide a domain name such as "example.com", optionally with "https://" and a port.`
+    );
+  }
 
   if (issues.length > 0) return { valid: false, issues };
+
+  const bytes = utf8ByteLength(generateRobotsTxt(options));
+  if (bytes > MAX_ROBOTS_BYTES) {
+    return {
+      valid: false,
+      issues: [
+        `The generated robots.txt is ${bytes} bytes. Google ignores everything after ${MAX_ROBOTS_BYTES} bytes (500 KiB).`
+      ]
+    };
+  }
   return { valid: true, options };
 }

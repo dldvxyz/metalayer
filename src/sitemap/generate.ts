@@ -4,8 +4,7 @@
  * @module
  */
 
-import { normalizeUrl } from "../shared/url.js";
-import { toLocation } from "./location.js";
+import { buildLocation, toLocation } from "./location.js";
 import type { SitemapOptions, SitemapUrl } from "./types.js";
 
 /** Escapes the five XML special characters in a string. */
@@ -22,7 +21,8 @@ function escapeXml(value: string): string {
 
 /** Builds a single `<url>` XML element for the sitemap. */
 function buildUrlEntry(url: SitemapUrl, origin: string): string {
-  const location = normalizeUrl(toLocation(origin, url.path));
+  const location =
+    buildLocation(origin, url.path) ?? toLocation(origin, url.path);
 
   // Defense-in-depth: escape all interpolated values even when they are
   // expected to be safe (e.g. ISO dates, enum strings). This prevents
@@ -49,7 +49,8 @@ function buildUrlEntry(url: SitemapUrl, origin: string): string {
  * Produces a standard sitemap conforming to the sitemaps.org 0.9 schema,
  * with each URL entry including optional lastmod, changefreq, and priority.
  * URLs are normalized by the platform URL parser (percent-encoding of
- * non-ASCII characters, default port removal) and XML-escaped.
+ * non-ASCII characters, default port removal), escaped as RFC 3986
+ * requires, and XML-escaped.
  *
  * @remarks
  * This function does not validate the input. Call {@link validateSitemap}

@@ -23,8 +23,8 @@ function normalizeHandlerUrl(url: string): string {
  * are parsed and re-serialized by the platform URL parser, which applies
  * percent-encoding normalization and removes default ports. Image `sizes`
  * given as arrays are written as the manifest's space-separated string,
- * protocol schemes are lowercased, and scope extensions are written with
- * `type: "origin"` and a bare origin. The result is formatted with
+ * single file handler extensions as one-element lists, protocol schemes in
+ * lowercase, and scope extensions with `type: "origin"` and a bare origin. The result is formatted with
  * 2-space indentation and a trailing newline.
  *
  * @remarks
@@ -83,6 +83,13 @@ export function generateManifest(options: ManifestOptions): string {
     output.file_handlers = options.file_handlers.map((handler) => ({
       ...handler,
       action: normalizeUrl(handler.action),
+      // The spec requires a list of extensions for every MIME type.
+      accept: Object.fromEntries(
+        Object.entries(handler.accept).map(([type, extensions]) => [
+          type,
+          typeof extensions === "string" ? [extensions] : extensions
+        ])
+      ),
       ...(handler.icons && { icons: serializeImageResources(handler.icons) })
     }));
   }

@@ -4,6 +4,8 @@ import type { CssColor, ManifestOptions } from "../src/index.js";
 import { generateManifest, validateManifest } from "../src/index.js";
 import { expectIssues, expectValid, parseJson, untyped } from "./helpers.js";
 
+const NO_BREAK_SPACE = String.fromCodePoint(0xa0);
+
 /** Generates a manifest and parses it back for structural assertions. */
 function generate(options: ManifestOptions): unknown {
   return parseJson(generateManifest(options));
@@ -13,6 +15,17 @@ describe(generateManifest, () => {
   it("outputs pretty-printed JSON with a trailing newline", () => {
     expect(generateManifest({ name: "Test", short_name: "T" })).toBe(
       '{\n  "name": "Test",\n  "short_name": "T"\n}\n'
+    );
+  });
+
+  it("keeps the key order of image objects", () => {
+    expect(
+      generateManifest({
+        name: "A",
+        icons: [{ src: "/a.png", sizes: "192x192", type: "image/png" }]
+      })
+    ).toBe(
+      '{\n  "name": "A",\n  "icons": [\n    {\n      "src": "/a.png",\n      "sizes": "192x192",\n      "type": "image/png"\n    }\n  ]\n}\n'
     );
   });
 
@@ -178,7 +191,7 @@ describe(generateManifest, () => {
         {
           name: "Text",
           action: "/open/file",
-          accept: { "text/plain": [".txt"], "text/markdown": ".md" },
+          accept: { "text/plain": [".txt"], "text/markdown": [".md"] },
           icons: [{ src: "/txt.png", sizes: "64x64" }],
           launch_type: "multiple-clients"
         }
@@ -273,6 +286,41 @@ describe(validateManifest, () => {
         related_applications: [{ platform: "play", id: "com.example.pwa" }],
         scope_extensions: [{ origin: "https://example.net" }]
       }
+    },
+    {
+      name: "format fallbacks and uppercase size separators",
+      options: {
+        name: "App",
+        icons: [
+          { src: "/icon.avif", type: "image/avif", sizes: "512x512" },
+          { src: "/icon.png", type: "image/png", sizes: "512X512" }
+        ]
+      }
+    },
+    {
+      name: "file handlers that share an action",
+      options: {
+        name: "App",
+        file_handlers: [
+          { name: "Text", action: "/open", accept: { "text/plain": ".txt" } },
+          { name: "CSV", action: "/open", accept: { "text/csv": [".csv"] } }
+        ]
+      }
+    },
+    {
+      name: "every display_override mode",
+      options: {
+        name: "App",
+        display: "standalone",
+        display_override: [
+          "window-controls-overlay",
+          "tabbed",
+          "unframed",
+          "fullscreen",
+          "minimal-ui",
+          "browser"
+        ]
+      }
     }
   ])("accepts $name", ({ options }) => {
     expectValid(validateManifest(options));
@@ -304,7 +352,7 @@ describe(validateManifest, () => {
       ]);
     });
 
-    it("detects SVG icons by type, extension or MIME parameters", () => {
+    it("detects SVG icons by type or extension", () => {
       expectValid(
         validateManifest({
           name: "App",
@@ -312,12 +360,43 @@ describe(validateManifest, () => {
             { src: "/icon.svg", sizes: "any" },
             {
               src: "/mono",
-              type: "image/svg+xml; charset=utf-8",
+              type: "image/svg+xml",
               sizes: "any",
               purpose: "monochrome"
             }
           ]
         })
+      );
+    });
+
+    it.each([
+      ["image/svg+xml; charset=utf-8", "has MIME parameters"],
+      ["text/html", "is not an image MIME type"],
+      ["image/", "is not an image MIME type"],
+      ["image/png,image/webp", "is not an image MIME type"]
+    ])("rejects the type %j", (type, problem) => {
+      expectIssues(
+        validateManifest(
+          untyped({ name: "App", icons: [{ src: "/i.png", type }] })
+        ),
+        [`icons[0]: type "${type}" ${problem}`]
+      );
+    });
+
+    it("compares size tokens case-insensitively", () => {
+      expectIssues(
+        validateManifest({
+          name: "App",
+          icons: [
+            { src: "/a.png", sizes: "192X192" },
+            { src: "/b.png", sizes: "192x192" },
+            { src: "/c.ico", sizes: ["16x16", "16X16"] }
+          ]
+        }),
+        [
+          'Duplicate size "192x192" in icons',
+          'icons[2]: size "16X16" is listed twice'
+        ]
       );
     });
 
@@ -450,13 +529,25 @@ describe(validateManifest, () => {
           name: "App",
           icons: [
             { src: "/a.png", purpose: untyped("badge") },
-            { src: "/b.png", purpose: "maskable maskable" }
+            { src: "/b.png", purpose: untyped("maskable maskable") }
           ]
         }),
         [
           'icons[0]: unknown purpose "badge"',
           'icons[1]: purpose token "maskable" is repeated'
         ]
+      );
+    });
+
+    it("splits purpose on ASCII whitespace only, as browsers do", () => {
+      expectIssues(
+        validateManifest(
+          untyped({
+            name: "App",
+            icons: [{ src: "/a.png", purpose: `any${NO_BREAK_SPACE}maskable` }]
+          })
+        ),
+        ["icons[0]: unknown purpose"]
       );
     });
 
@@ -595,6 +686,50 @@ describe(validateManifest, () => {
       );
     });
 
+    it("checks URLs against the default scope when scope is absent", () => {
+      expectIssues(
+        validateManifest({
+          name: "App",
+          start_url: "/app/index.html?source=pwa",
+          shortcuts: [
+            { name: "Inbox", url: "/app/inbox" },
+            { name: "Settings", url: "/settings" }
+          ]
+        }),
+        [
+          'shortcuts[1]: url "/settings" is outside the default scope "/app/" that browsers derive from start_url'
+        ]
+      );
+    });
+
+    it("derives a root default scope from a root start_url", () => {
+      expectValid(
+        validateManifest({
+          name: "App",
+          start_url: "/index.html",
+          shortcuts: [{ name: "Settings", url: "/settings" }]
+        })
+      );
+    });
+
+    it("resolves a path scope against an absolute start_url", () => {
+      expectIssues(
+        validateManifest({
+          name: "App",
+          scope: "/",
+          start_url: "https://example.com/",
+          shortcuts: [{ name: "Other", url: "https://other.com/x" }],
+          protocol_handlers: [
+            { protocol: "web+app", url: "https://evil.com/h?u=%s" }
+          ]
+        }),
+        [
+          'shortcuts[0]: url "https://other.com/x" is outside the manifest scope "/"',
+          'protocol_handlers[0]: URL "https://evil.com/h?u=%s" is outside the manifest scope "/"'
+        ]
+      );
+    });
+
     it("compares only paths when the scope is relative", () => {
       expectIssues(
         validateManifest({
@@ -653,6 +788,28 @@ describe(validateManifest, () => {
           scope: "https://example.com/"
         },
         issue: 'id "https://other.com/" must be same-origin'
+      },
+      {
+        name: "an id with an uppercase scheme on another origin",
+        options: {
+          name: "App",
+          id: "HTTPS://other.com/app",
+          start_url: "https://example.com/"
+        },
+        issue: 'id "HTTPS://other.com/app" must be same-origin'
+      },
+      {
+        name: "a URN id",
+        options: {
+          name: "App",
+          id: "urn:uuid:7d1c6b42-9e1e-4d6a-b6f3-1f6c3e1a2b3c"
+        },
+        issue: 'is a "urn:" URL, so it cannot be same-origin with start_url'
+      },
+      {
+        name: "an id with a custom scheme",
+        options: { name: "App", id: "myapp:main" },
+        issue: 'id "myapp:main" is a "myapp:" URL'
       },
       {
         name: "a blank id",
@@ -734,6 +891,20 @@ describe(validateManifest, () => {
       "rgb(garbage)",
       "rgb(1, 2)",
       "color(1 0 0)",
+      "rgb(255 0 0 0.5)",
+      "rgb(255, 0 0)",
+      "rgb(255, 50%, 0)",
+      "oklch(62%, 0.19, 258)",
+      "hwb(120, 0%, 0%)",
+      "color(displayp3 1 0 0)",
+      "color(srgb 1 0 0 0.5)",
+      "rgb(255deg 0 0)",
+      "hsl(120% 100% 50%)",
+      "hsl(120, 100, 50)",
+      "rgb(255 0 0 / )",
+      "rgb(from red r g b)",
+      "rgb(1. 0 0)",
+      `red${NO_BREAK_SPACE}`,
       ""
     ])("rejects %j", (color) => {
       expectIssues(validateManifest({ name: "App", theme_color: color }), [
@@ -799,16 +970,62 @@ describe(validateManifest, () => {
   });
 
   describe("file handlers and share target", () => {
-    it("rejects file handlers with the same action", () => {
+    it.each([
+      [{}, "file_handlers[0]: accept must map at least one MIME type"],
+      [
+        { "images/png": [".png"] },
+        'accept key "images/png" is not a MIME type'
+      ],
+      [
+        { "text/plain": ["."] },
+        'extension "." for "text/plain" must start with "."'
+      ],
+      [{ "text/plain": ["txt"] }, 'extension "txt" for "text/plain"'],
+      [
+        { "text/plain": [".averyveryverylongext"] },
+        'extension ".averyveryverylongext"'
+      ],
+      [
+        { "text/plain": [] },
+        '"text/plain" must list at least one file extension'
+      ]
+    ])("rejects the file handler accept map %j", (accept, issue) => {
       expectIssues(
-        validateManifest({
-          name: "App",
-          file_handlers: [
-            { action: "/open", accept: { "text/plain": [".txt"] } },
-            { action: "/./open", accept: { "text/csv": ".csv" } }
-          ]
-        }),
-        ['Duplicate action "/./open" in file_handlers']
+        validateManifest(
+          untyped({ name: "App", file_handlers: [{ action: "/open", accept }] })
+        ),
+        [issue]
+      );
+    });
+
+    it.each([
+      [
+        { name: "", accept: "image/*" },
+        "share_target.params.files[0]: name must be a non-empty string"
+      ],
+      [
+        { name: "f", accept: "image/*,video/*" },
+        'accept value "image/*,video/*" must be a file extension'
+      ],
+      [{ name: "f", accept: ["images/png"] }, 'accept value "images/png"'],
+      [
+        { name: "f", accept: [] },
+        "accept must list at least one MIME type or file extension"
+      ]
+    ])("rejects the share target file filter %j", (file, issue) => {
+      expectIssues(
+        validateManifest(
+          untyped({
+            name: "App",
+            share_target: {
+              action: "/share",
+              method: "POST",
+              enctype: "multipart/form-data",
+              params: { files: [file] }
+            }
+          })
+        ),
+        [issue]
       );
     });
 
@@ -873,6 +1090,11 @@ describe(validateManifest, () => {
         name: "an unknown value",
         options: untyped({ name: "App", display_override: ["standalon"] }),
         issue: 'Unknown display_override value "standalon"'
+      },
+      {
+        name: "the renamed borderless mode",
+        options: untyped({ name: "App", display_override: ["borderless"] }),
+        issue: 'display_override value "borderless" was renamed to "unframed"'
       }
     ])("rejects $name", ({ options, issue }) => {
       expectIssues(validateManifest(options), [issue]);
@@ -897,13 +1119,28 @@ describe(validateManifest, () => {
       ["http://other.com", "must use the https scheme"],
       ["https://other.com/app", "must be a bare origin"],
       ["https://other.com?", "must be a bare origin"],
-      ["https://user@other.com", "must be a bare origin"]
+      ["https://user@other.com", "must be a bare origin"],
+      ["https://localhost", "has a single-label host"]
     ])("rejects %j", (origin, problem) => {
       expectIssues(
         validateManifest(
           untyped({ name: "App", scope_extensions: [{ origin }] })
         ),
         [`scope_extensions[0]: origin "${origin}" ${problem}`]
+      );
+    });
+
+    it("rejects more entries than Chromium reads", () => {
+      expectIssues(
+        validateManifest(
+          untyped({
+            name: "App",
+            scope_extensions: Array.from({ length: 11 }, (_, index) => ({
+              origin: `https://site${index}.example`
+            }))
+          })
+        ),
+        ["scope_extensions has 11 entries. Chromium reads only the first 10"]
       );
     });
 

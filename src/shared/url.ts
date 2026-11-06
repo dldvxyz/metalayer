@@ -11,6 +11,15 @@
  * @module
  */
 
+/** Matches a percent-encoded octet and captures its two hex digits. */
+const PERCENT_OCTET_RX = /%(?<hex>[0-9a-fA-F]{2})/gu;
+
+/** Matches a single RFC 3986 unreserved character. */
+const UNRESERVED_CHAR_RX = /^[A-Za-z0-9._~-]$/u;
+
+/** Matches any non-ASCII code point. */
+const NON_ASCII_RX = /[\u0080-\u{10FFFF}]/gu;
+
 /** Placeholder origin used to validate relative paths as if they were full URLs. */
 const ARBITRARY_ORIGIN = "https://example.com";
 
@@ -154,4 +163,29 @@ export function isValidUrlOrPath(urlOrPath: string): boolean {
  */
 export function getPathname(urlOrPath: string): string | undefined {
   return parseUrlOrPath(urlOrPath)?.pathname.toLowerCase();
+}
+
+/**
+ * Canonicalizes percent-encoding for comparison, as RFC 3986 section 6.2.2
+ * and RFC 9309 section 2.2.2 describe: non-ASCII characters are
+ * percent-encoded as UTF-8, percent-encoded unreserved characters are
+ * decoded, and the hex digits of the remaining escapes are uppercased.
+ *
+ * Nothing else changes, so robots.txt pattern characters (`*`, `$`, `?`)
+ * and dot segments keep their meaning. Use the result only as a comparison key.
+ *
+ * @param value - A URL, path or path pattern.
+ * @returns The canonical form, or the value unchanged if it cannot be encoded.
+ */
+export function canonicalizePercentEncoding(value: string): string {
+  try {
+    return value
+      .replaceAll(NON_ASCII_RX, (char) => encodeURIComponent(char))
+      .replaceAll(PERCENT_OCTET_RX, (match, hex: string) => {
+        const char = String.fromCodePoint(Number.parseInt(hex, 16));
+        return UNRESERVED_CHAR_RX.test(char) ? char : match.toUpperCase();
+      });
+  } catch {
+    return value;
+  }
 }

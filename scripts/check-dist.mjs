@@ -1,8 +1,10 @@
 /**
  * Smoke test for the published build.
  *
- * Loads both entry points on plain Node.js (no bundler, no TypeScript),
- * checks that they expose the same API and produce identical output.
+ * Loads the package through its own name on plain Node.js (no bundler, no
+ * TypeScript), so both entry points are resolved through the `exports` map
+ * exactly as consumers resolve them. Checks that they expose the same API
+ * and produce identical output.
  * Run after `bun run build`:
  *   node scripts/check-dist.mjs
  */
@@ -36,14 +38,14 @@ function isApi(value) {
   );
 }
 
-// The dist paths are resolved at runtime so type checking does not depend on a prior build.
-const esmEntry = new URL("../dist/index.mjs", import.meta.url).href;
+// A non-literal specifier keeps type checking independent of a prior build.
+const specifier = "metalayer";
 const requireCjs = createRequire(import.meta.url);
 
 /** @type {unknown} */
-const esm = await import(esmEntry);
+const esm = await import(specifier);
 /** @type {unknown} */
-const cjs = requireCjs("../dist/index.cjs");
+const cjs = requireCjs(specifier);
 assert.ok(isApi(esm), "ESM build is missing exports");
 assert.ok(isApi(cjs), "CJS build is missing exports");
 

@@ -1,19 +1,20 @@
 /**
  * Validation of `lastmod` values.
  *
- * The sitemap protocol uses the W3C Datetime format. This module accepts
- * a calendar date (`YYYY-MM-DD`) or a date and time with a mandatory
- * time zone (`YYYY-MM-DDThh:mm[:ss[.s]]` followed by `Z` or `±hh:mm`),
- * which is the subset shared by the protocol and its XML schema. Fields
- * are range-checked here rather than left to the host's `Date` parser so
- * that behaviour is identical on every runtime.
+ * The sitemap protocol uses the W3C Datetime profile, and its XML schema
+ * types `lastmod` as `xsd:date` or `xsd:dateTime`. This module accepts the
+ * forms that are valid under both: a calendar date (`YYYY-MM-DD`), or a
+ * date and time with seconds and a time zone (`YYYY-MM-DDThh:mm:ss`,
+ * optionally with a decimal fraction of a second, followed by `Z` or
+ * `±hh:mm`). Fields are range-checked here rather than left to the host's
+ * `Date` parser, so behaviour is identical on every runtime.
  *
  * @module
  */
 
-/** Matches the accepted W3C Datetime forms and captures every field. */
-const W3C_DATETIME_RX =
-  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:T(?<hour>\d{2}):(?<minute>\d{2})(?::(?<second>\d{2})(?<fraction>\.\d+)?)?(?<zone>Z|[+-]\d{2}:\d{2}))?$/u;
+/** Matches the accepted forms and captures every field. */
+const LASTMOD_RX =
+  /^(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})(?:T(?<hour>\d{2}):(?<minute>\d{2}):(?<second>\d{2})(?<fraction>\.\d+)?(?<zone>Z|[+-]\d{2}:\d{2}))?$/u;
 
 /** Matches a `±hh:mm` time zone offset. */
 const ZONE_OFFSET_RX = /^(?<sign>[+-])(?<hours>\d{2}):(?<minutes>\d{2})$/u;
@@ -24,8 +25,6 @@ const MIN_YEAR = 1900;
 const MAX_HOUR = 23;
 const MAX_MINUTE = 59;
 const MAX_SECOND = 59;
-/** XML Schema allows `24:00:00` as the end of a day. */
-const END_OF_DAY_HOUR = 24;
 /** Time zone offsets range from -14:00 to +14:00. */
 const MAX_OFFSET_HOURS = 14;
 
@@ -42,7 +41,7 @@ const MAX_TIMEZONE_AHEAD_MS = MAX_OFFSET_HOURS * MS_PER_HOUR;
 /** Tolerance for clock skew between the machine that wrote `lastmod` and this one. */
 const CLOCK_SKEW_MS = 5 * MS_PER_MINUTE;
 
-/** Parses a `±hh:mm` offset into milliseconds, or `undefined` if out of range. */
+/** Parses `Z` or a `±hh:mm` offset into milliseconds, or `undefined` if out of range. */
 function parseZoneOffset(zone: string): number | undefined {
   if (zone === "Z") return 0;
   const groups = ZONE_OFFSET_RX.exec(zone)?.groups;
@@ -59,7 +58,7 @@ function parseZoneOffset(zone: string): number | undefined {
   return groups.sign === "-" ? -offset : offset;
 }
 
-/** Checks that year, month and day form a real calendar date (in UTC, independent of the host time zone). */
+/** Checks that year, month and day form a real calendar date, independent of the host time zone. */
 function isCalendarDate(year: number, month: number, day: number): boolean {
   const date = new Date(Date.UTC(year, month - 1, day));
   return (
@@ -72,7 +71,7 @@ function isCalendarDate(year: number, month: number, day: number): boolean {
 /**
  * Validates a `lastmod` value.
  *
- * Accepts `YYYY-MM-DD`, or `YYYY-MM-DDThh:mm[:ss[.s]]` followed by `Z` or
+ * Accepts `YYYY-MM-DD`, or `YYYY-MM-DDThh:mm:ss[.s]` followed by `Z` or
  * `±hh:mm`. Checks calendar correctness and field ranges, rejects years
  * before 1900, and rejects values in the future (allowing for time zones
  * on date-only values and for a few minutes of clock skew on datetimes).
@@ -82,7 +81,7 @@ function isCalendarDate(year: number, month: number, day: number): boolean {
  * @returns `true` if the value is an acceptable `lastmod`.
  */
 export function isValidLastmod(value: string, now: Date): boolean {
-  const groups = W3C_DATETIME_RX.exec(value)?.groups;
+  const groups = LASTMOD_RX.exec(value)?.groups;
   if (!groups) return false;
 
   const year = Number(groups.year);
@@ -104,29 +103,19 @@ export function isValidLastmod(value: string, now: Date): boolean {
 
   const hour = Number(groups.hour);
   const minute = Number(groups.minute);
-  const second = groups.second === undefined ? 0 : Number(groups.second);
-  const millisecond =
-    groups.fraction === undefined
-      ? 0
-      : Math.round(Number(groups.fraction) * MS_PER_SECOND);
-
-  const isEndOfDay =
-    hour === END_OF_DAY_HOUR &&
-    minute === 0 &&
-    second === 0 &&
-    millisecond === 0;
-  const isTimeInRange =
-    hour <= MAX_HOUR && minute <= MAX_MINUTE && second <= MAX_SECOND;
-  if (!(isTimeInRange || isEndOfDay)) return false;
+  const second = Number(groups.second);
+  if (hour > MAX_HOUR || minute > MAX_MINUTE || second > MAX_SECOND) {
+    return false;
+  }
 
   const offset = parseZoneOffset(groups.zone ?? "");
   if (offset === undefined) return false;
 
+  const fraction = groups.fraction === undefined ? 0 : Number(groups.fraction);
   const timeOfDay =
     hour * MS_PER_HOUR +
     minute * MS_PER_MINUTE +
-    second * MS_PER_SECOND +
-    millisecond;
+    (second + fraction) * MS_PER_SECOND;
   const instant = dateUtc + timeOfDay - offset;
   return instant <= now.getTime() + CLOCK_SKEW_MS;
 }

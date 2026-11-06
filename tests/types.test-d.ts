@@ -13,6 +13,7 @@ import type {
   RobotsOptions,
   RobotsRule,
   SitemapOptions,
+  SitemapUrl,
   UrlPath,
   UserAgent,
   ValidationResult
@@ -63,24 +64,30 @@ describe("shared types", () => {
 });
 
 describe("sitemap types", () => {
-  it("IsoDate requires two-digit month and day", () => {
+  it("IsoDate checks the date shape", () => {
     expectTypeOf<"2024-01-15">().toExtend<IsoDate>();
-    expectTypeOf<"2024-12-31">().toExtend<IsoDate>();
-    expectTypeOf<"2024-1-5">().not.toExtend<IsoDate>();
-    expectTypeOf<"2024-13-01">().not.toExtend<IsoDate>();
-    expectTypeOf<"2024-01-32">().not.toExtend<IsoDate>();
-    expectTypeOf<"01-15-2024">().not.toExtend<IsoDate>();
+    expectTypeOf<"2024/01/15">().not.toExtend<IsoDate>();
+    expectTypeOf<"2024-01-xx">().not.toExtend<IsoDate>();
+    expectTypeOf<"2024-01">().not.toExtend<IsoDate>();
   });
 
-  it("IsoDateTime requires a time zone and allows optional seconds and fractions", () => {
-    expectTypeOf<"2024-01-15T10:30Z">().toExtend<IsoDateTime>();
+  it("IsoDateTime requires seconds and a time zone", () => {
     expectTypeOf<"2024-01-15T10:30:00Z">().toExtend<IsoDateTime>();
     expectTypeOf<"2024-01-15T10:30:00.123Z">().toExtend<IsoDateTime>();
     expectTypeOf<"2024-01-15T10:30:00+05:30">().toExtend<IsoDateTime>();
     expectTypeOf<"2024-01-15T10:30:00-08:00">().toExtend<IsoDateTime>();
     expectTypeOf<"2024-01-15T10:30:00">().not.toExtend<IsoDateTime>();
-    expectTypeOf<"2024-01-15T10:30:0garbage">().not.toExtend<IsoDateTime>();
+    expectTypeOf<"2024-01-15T10:30Z">().not.toExtend<IsoDateTime>();
     expectTypeOf<"2024-01-15 10:30:00Z">().not.toExtend<IsoDateTime>();
+  });
+
+  it("optional members accept explicit undefined", () => {
+    expectTypeOf<{
+      path: "/";
+      lastmod: undefined;
+      changefreq: undefined;
+      priority: undefined;
+    }>().toExtend<SitemapUrl>();
   });
 
   it("SitemapOptions accepts as-const input", () => {
@@ -123,6 +130,20 @@ describe("robots types", () => {
     }>().not.toExtend<RobotsOptions>();
   });
 
+  it("optional members accept explicit undefined", () => {
+    expectTypeOf<{
+      userAgent: ["*"];
+      allow: ["/"];
+      disallow: undefined;
+      crawlDelay: undefined;
+    }>().toExtend<RobotsRule>();
+    expectTypeOf<{
+      rules: [{ userAgent: ["*"]; allow: ["/"] }];
+      sitemaps: undefined;
+      host: undefined;
+    }>().toExtend<RobotsOptions>();
+  });
+
   it("UserAgent suggests known tokens but accepts any string", () => {
     expectTypeOf<"Googlebot">().toExtend<UserAgent>();
     expectTypeOf<"MyCustomBot">().toExtend<UserAgent>();
@@ -155,8 +176,12 @@ describe("manifest types", () => {
     }>().not.toExtend<ManifestOptions>();
     expectTypeOf<{
       name: "a";
-      display_override: ["tabbed", "borderless"];
+      display_override: ["tabbed", "unframed"];
     }>().toExtend<ManifestOptions>();
+    expectTypeOf<{
+      name: "a";
+      display_override: ["borderless"];
+    }>().not.toExtend<ManifestOptions>();
     expectTypeOf<{
       name: "a";
       display_override: ["popup"];
@@ -175,6 +200,23 @@ describe("manifest types", () => {
     }>().not.toExtend<ManifestOptions>();
   });
 
+  it("ImageSize accepts either case of the x separator", () => {
+    expectTypeOf<{
+      name: "a";
+      icons: [{ src: "/i.png"; sizes: "192X192" }];
+    }>().toExtend<ManifestOptions>();
+  });
+
+  it("optional members accept explicit undefined", () => {
+    expectTypeOf<{
+      name: "a";
+      short_name: undefined;
+      start_url: undefined;
+      theme_color: undefined;
+      icons: [{ src: "/i.png"; sizes: undefined; purpose: undefined }];
+    }>().toExtend<ManifestOptions>();
+  });
+
   it("accepts an absolute or relative scope", () => {
     expectTypeOf<{ name: "a"; scope: "/" }>().toExtend<ManifestOptions>();
     expectTypeOf<{
@@ -189,6 +231,8 @@ describe("manifest types", () => {
     expectTypeOf<"any maskable">().toExtend<ImagePurpose>();
     expectTypeOf<"monochrome any maskable">().toExtend<ImagePurpose>();
     expectTypeOf<"badge">().not.toExtend<ImagePurpose>();
+    expectTypeOf<"any any">().not.toExtend<ImagePurpose>();
+    expectTypeOf<"maskable any maskable">().not.toExtend<ImagePurpose>();
   });
 
   it("CssColor suggests color functions but accepts any string", () => {
@@ -216,6 +260,15 @@ describe("manifest types", () => {
       action: "/share";
       params: { title: "t" };
     }>().toExtend<ManifestShareTarget>();
+    expectTypeOf<{
+      action: "/share";
+      method: "POST";
+      params: { title: "t"; files: [{ name: "f"; accept: "image/*" }] };
+    }>().not.toExtend<ManifestShareTarget>();
+    expectTypeOf<{
+      action: "/share";
+      params: { title: "t"; files: [{ name: "f"; accept: "image/*" }] };
+    }>().not.toExtend<ManifestShareTarget>();
   });
 
   it("scope_extensions origins must use https", () => {

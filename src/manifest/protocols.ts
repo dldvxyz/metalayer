@@ -49,9 +49,11 @@ const WEB_PLUS_RX = /^web\+[a-z]+$/u;
 export const PROTOCOL_PLACEHOLDER = "%s";
 
 /**
- * Stand-in for `%s` while a handler URL is parsed or normalized: the URL
- * parser would otherwise percent-encode the "%". Lowercase, because the
- * parser lowercases hosts. Chosen to be vanishingly unlikely in a real URL.
+ * Stand-in for `%s` while a handler URL is parsed or normalized. "%" is a
+ * forbidden host code point, so a URL with `%s` in its host would not parse
+ * at all; substituting lets the host check and normalization run.
+ * Lowercase, because the parser lowercases hosts. Chosen to be vanishingly
+ * unlikely in a real URL.
  */
 export const PLACEHOLDER_TOKEN = "metalayer-ps-a9f2";
 
