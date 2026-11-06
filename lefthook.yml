@@ -1,4 +1,4 @@
-# `bun lefthook install` to activate
+# Hooks are installed automatically by `bun install`.
 # `bun lefthook uninstall` to deactivate
 
 pre-commit:
@@ -6,10 +6,12 @@ pre-commit:
   jobs:
     - name: Lint and format
       glob:
-        - "*.ts"
+        - "*.{ts,mts,cts,js,mjs,cjs}"
         - "*.{json,jsonc}"
+        - "*.{yml,yaml}"
+        - "*.md"
       run: bun run lint:fix {staged_files}
-      stage-fixed: true
+      stage_fixed: true
 
     - name: Typecheck
       run: bun run typecheck

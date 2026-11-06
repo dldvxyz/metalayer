@@ -2,12 +2,14 @@
  * Array that is guaranteed to contain at least one element.
  *
  * Used throughout the API to enforce non-empty collections at the type level.
+ * The tuple is `readonly`, so `as const` and frozen arrays are accepted.
+ * The library never mutates its inputs.
  *
  * @example
  * const agents: NonEmptyArray<string> = ["Googlebot"]; // OK
  * const empty: NonEmptyArray<string> = []; // Type error
  */
-export type NonEmptyArray<T> = [T, ...T[]];
+export type NonEmptyArray<T> = readonly [T, ...T[]];
 
 /**
  * Array that is guaranteed to contain at least two elements.
@@ -23,7 +25,7 @@ export type NonEmptyArray<T> = [T, ...T[]];
  * const sizes: NonUnitaryArray<string> = ["16x16", "32x32"]; // OK
  * const one: NonUnitaryArray<string> = ["16x16"]; // Type error
  */
-export type NonUnitaryArray<T> = [T, T, ...T[]];
+export type NonUnitaryArray<T> = readonly [T, T, ...T[]];
 
 /**
  * Absolute URL starting with https:// or http://.

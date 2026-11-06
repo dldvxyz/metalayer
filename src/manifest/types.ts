@@ -3,7 +3,7 @@ import type {
   NonEmptyArray,
   NonUnitaryArray,
   UrlPath
-} from "./shared.js";
+} from "../shared/types.js";
 
 /**
  * Display mode for the web app.
@@ -19,11 +19,17 @@ export type ManifestDisplay =
   | "minimal-ui"
   | "browser";
 
-/** Display mode override; accepts standard modes plus "window-controls-overlay" or any custom string. */
+/**
+ * Display mode override: the standard modes plus the incubating
+ * `"window-controls-overlay"`, `"tabbed"` and `"borderless"` modes.
+ * Browsers silently skip values they do not recognise, so
+ * {@link validateManifest} rejects anything outside this list.
+ */
 export type ManifestDisplayOverride =
   | ManifestDisplay
   | "window-controls-overlay"
-  | (string & {});
+  | "tabbed"
+  | "borderless";
 
 /**
  * Preferred screen orientation for the web app.
@@ -44,43 +50,57 @@ export type ManifestOrientation =
   | "portrait-primary"
   | "portrait-secondary";
 
-/** Purpose of a manifest image resource. */
+/** A single purpose token for a manifest image resource. */
+export type ImagePurposeToken = "any" | "maskable" | "monochrome";
+
+/**
+ * Purpose of a manifest image resource: one or more unique tokens,
+ * space-separated (e.g. `"any maskable"`).
+ *
+ * Browsers ignore unknown tokens and drop an icon whose tokens are all
+ * unknown, so {@link validateManifest} rejects unknown and repeated tokens.
+ */
 export type ImagePurpose =
-  | "any"
-  | "maskable"
-  | "monochrome"
-  | "maskable monochrome"
-  | "monochrome maskable";
+  | ImagePurposeToken
+  | `${ImagePurposeToken} ${ImagePurposeToken}`
+  | `${ImagePurposeToken} ${ImagePurposeToken} ${ImagePurposeToken}`;
 
 /** MIME type of a manifest image resource. Common types are provided as autocomplete suggestions. */
 export type ImageMimeType =
   | "image/png"
-  | "image/svg+xml"
+  | "image/jpeg"
   | "image/webp"
+  | "image/avif"
+  | "image/gif"
+  | "image/svg+xml"
   | "image/x-icon"
-  | (`image/${string}` & {});
+  | "image/vnd.microsoft.icon"
+  | (`image/${string}` & Record<never, never>);
 
 /**
  * Image dimensions in "widthxheight" format (e.g. `"192x192"`).
  *
- * Both dimensions must be positive integers. For icons,
- * {@link validateManifest} also enforces that sizes are square.
+ * Both dimensions must be positive integers without leading zeros
+ * (checked by {@link validateManifest}, which also enforces that icon
+ * sizes are square).
  */
 export type ImageSize = `${number}x${number}`;
 
 /**
- * CSS color value (sRGB only).
+ * CSS color value.
  *
- * The W3C manifest spec restricts `theme_color` and `background_color`
- * to sRGB colors. Modern CSS functions like `oklch()`, `lab()`, and
- * `color()` are not supported in manifest color fields.
- *
- * Accepted formats: hex (`#rgb`, `#rrggbb`, `#rrggbbaa`),
- * `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named color (e.g. `"rebeccapurple"`).
+ * Browsers accept any CSS color that can be converted to sRGB without
+ * context: hex (`#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`), the
+ * `rgb()`, `hsl()`, `hwb()`, `lab()`, `lch()`, `oklab()`,
+ * `oklch()` and `color()` functions, and the CSS named colors
+ * (e.g. `"rebeccapurple"`). Context-dependent values such as
+ * `currentcolor` are not allowed. The template-literal members exist for
+ * autocompletion; any string is accepted at the type level and checked
+ * by {@link validateManifest}.
  *
  * @example "#4285f4"
- * @example "rgb(66, 133, 244)"
- * @example "hsl(217, 89%, 61%)"
+ * @example "rgb(66 133 244)"
+ * @example "oklch(62% 0.19 258)"
  */
 export type CssColor =
   | `#${string}`
@@ -88,13 +108,20 @@ export type CssColor =
   | `rgba(${string})`
   | `hsl(${string})`
   | `hsla(${string})`
-  | (string & {});
+  | `hwb(${string})`
+  | `lab(${string})`
+  | `lch(${string})`
+  | `oklab(${string})`
+  | `oklch(${string})`
+  | `color(${string})`
+  | (string & Record<never, never>);
 
 /**
- * Absolute URL or URL path starting with "/".
+ * Absolute http(s) URL or URL path starting with "/".
  *
  * Used for manifest fields that accept either form
- * (e.g. `start_url`, `scope`, icon `src`).
+ * (e.g. `start_url`, icon `src`). Protocol-relative URLs
+ * (`//cdn.example.com/icon.png`) are not supported; use an absolute URL.
  *
  * @example "https://example.com/icon.png"
  * @example "/icon.png"
@@ -111,7 +138,11 @@ export type UrlOrPath = AbsoluteUrl | UrlPath;
 export interface ManifestImageResourceBase {
   /** URL or path to the image file. */
   src: UrlOrPath;
-  /** Image dimensions. Format depends on the resource type. */
+  /**
+   * Image dimensions. Format depends on the resource type.
+   * An array is serialized as the manifest's space-separated string
+   * (e.g. `["16x16", "32x32"]` becomes `"16x16 32x32"`).
+   */
   sizes?: "any" | ImageSize | NonUnitaryArray<ImageSize>;
   /** MIME type of the image (e.g. `"image/png"`). */
   type?: ImageMimeType;
@@ -122,8 +153,9 @@ export interface ManifestImageResource extends ManifestImageResourceBase {
   /**
    * One or more image dimensions.
    *
-   * Use `"any"` for scalable formats (SVG). ICO files may specify multiple sizes.
-   * All other formats must specify a single size.
+   * Use `"any"` for scalable formats (SVG). ICO files may specify multiple
+   * sizes, which are serialized as a space-separated string. All other
+   * formats must specify a single, square size.
    *
    * @example "192x192"
    * @example ["16x16", "32x32"] // ICO only
@@ -135,6 +167,23 @@ export interface ManifestImageResource extends ManifestImageResourceBase {
    */
   purpose?: ImagePurpose;
 }
+
+/** Platforms and stores defined by the Web App Manifest "Application Information" spec. */
+export type ScreenshotPlatform =
+  | "android"
+  | "chromeos"
+  | "ipados"
+  | "ios"
+  | "kaios"
+  | "macos"
+  | "windows"
+  | "xbox"
+  | "chrome_web_store"
+  | "itunes"
+  | "microsoft-inbox"
+  | "microsoft-store"
+  | "play"
+  | (string & Record<never, never>);
 
 /** A screenshot entry for the manifest. */
 export interface ManifestScreenshot extends ManifestImageResourceBase {
@@ -149,8 +198,8 @@ export interface ManifestScreenshot extends ManifestImageResourceBase {
   sizes?: "any" | ImageSize;
   /** Accessible description of the screenshot. */
   label?: string;
-  /** Platform the screenshot was taken on (e.g. `"iOS"`, `"Android"`, `"Windows"`). */
-  platform?: string;
+  /** Platform or store the screenshot applies to (e.g. `"ios"`, `"android"`, `"windows"`). */
+  platform?: ScreenshotPlatform;
   /** Form factor: `"narrow"` for mobile, `"wide"` for desktop/tablet. */
   form_factor?: "narrow" | "wide";
 }
@@ -169,29 +218,45 @@ export interface ManifestShortcut {
   icons?: NonEmptyArray<ManifestImageResource>;
 }
 
+/** A cryptographic fingerprint identifying a related native application. */
+export interface ManifestFingerprint {
+  /** Fingerprint type, as defined by the platform (e.g. `"sha256_cert"`). */
+  type: string;
+  /** Fingerprint value. */
+  value: string;
+}
+
+// Base fields shared by both ManifestRelatedApplication variants.
+interface ManifestRelatedApplicationBase {
+  /** Application platform (e.g. `"play"`, `"itunes"`, `"windows"`). */
+  platform: string;
+  /** Minimum version of the application considered related. */
+  min_version?: string;
+  /** Fingerprints used to verify the application. */
+  fingerprints?: NonEmptyArray<ManifestFingerprint>;
+}
+
 /**
  * A related native application listing. Requires at least one of `url` or `id`.
  *
  * @example { platform: "play", url: "https://play.google.com/store/apps/details?id=com.example" }
  * @example { platform: "itunes", id: "123456789" }
  */
-export type ManifestRelatedApplication =
-  | {
-      /** Application platform (e.g. `"play"`, `"itunes"`, `"windows"`). */
-      platform: string;
-      /** URL to the application's store listing. */
-      url: AbsoluteUrl;
-      /** Platform-specific application identifier (e.g. a package name or store ID). */
-      id?: string;
-    }
-  | {
-      /** Application platform (e.g. `"play"`, `"itunes"`, `"windows"`). */
-      platform: string;
-      /** URL to the application's store listing. */
-      url?: AbsoluteUrl;
-      /** Platform-specific application identifier (e.g. a package name or store ID). */
-      id: string;
-    };
+export type ManifestRelatedApplication = ManifestRelatedApplicationBase &
+  (
+    | {
+        /** URL to the application's store listing. */
+        url: AbsoluteUrl;
+        /** Platform-specific application identifier (e.g. a package name or store ID). */
+        id?: string;
+      }
+    | {
+        /** URL to the application's store listing. */
+        url?: AbsoluteUrl;
+        /** Platform-specific application identifier (e.g. a package name or store ID). */
+        id: string;
+      }
+  );
 
 /** A custom protocol handler registration. */
 export interface ManifestProtocolHandler {
@@ -202,7 +267,7 @@ export interface ManifestProtocolHandler {
   protocol: string;
   /**
    * URL template that handles the protocol. Must contain a `"%s"` placeholder
-   * that will be replaced with the protocol URL.
+   * that will be replaced with the protocol URL, and must be within the manifest scope.
    *
    * @example "/handle?url=%s"
    */
@@ -212,22 +277,33 @@ export interface ManifestProtocolHandler {
 /** A file type handler registration. */
 export interface ManifestFileHandler {
   /**
-   * URL that handles the file open action.
+   * URL that handles the file open action. Must be within the manifest scope.
    * @example "/open-file"
    */
   action: UrlOrPath;
+  /** Human-readable name of the file type, shown in file dialogs. */
+  name?: string;
   /**
-   * Map of MIME types to accepted file extensions.
+   * Map of MIME types to accepted file extension(s).
    *
-   * @example { "image/png": [".png"], "image/jpeg": [".jpg", ".jpeg"] }
+   * @example { "image/png": ".png", "image/jpeg": [".jpg", ".jpeg"] }
    */
-  accept: Record<`${string}/${string}`, NonEmptyArray<`.${string}`>>;
+  accept: Record<
+    `${string}/${string}`,
+    `.${string}` | NonEmptyArray<`.${string}`>
+  >;
+  /** Icons representing the file type. */
+  icons?: NonEmptyArray<ManifestImageResource>;
+  /**
+   * Whether multiple files open in one client (`"single-client"`) or one
+   * client per file (`"multiple-clients"`).
+   * @default "single-client"
+   */
+  launch_type?: "single-client" | "multiple-clients";
 }
 
-// Internal types composing the ManifestShareTarget discriminated union.
-
 /** Parameters that can be shared to the target app. */
-interface ShareTargetParams {
+export interface ShareTargetParams {
   /** Name of the query parameter for the shared title. */
   title?: string;
   /** Name of the query parameter for the shared text. */
@@ -236,16 +312,19 @@ interface ShareTargetParams {
   url?: string;
 }
 
+/** A MIME type (`"image/png"`, `"image/*"`) or file extension (`".png"`) accepted by a share target. */
+export type ShareTargetAccept = `.${string}` | `${string}/${string}`;
+
 /** A file type accepted by a share target. */
-interface ShareTargetFile {
+export interface ShareTargetFile {
   /** Name of the form field for the file data. */
   name: string;
-  /** Accepted file extension(s) (e.g. `".png"` or `[".jpg", ".jpeg"]`). */
-  accept: `.${string}` | NonUnitaryArray<`.${string}`>;
+  /** Accepted MIME type(s) or file extension(s) (e.g. `"image/*"`, `".png"` or `[".jpg", ".jpeg"]`). */
+  accept: ShareTargetAccept | NonEmptyArray<ShareTargetAccept>;
 }
 
 /** Share target using HTTP GET. Params are appended as query string parameters. */
-interface ManifestShareTargetGet {
+export interface ManifestShareTargetGet {
   /** URL that handles the share action. Must be within the manifest scope. */
   action: UrlOrPath;
   /** HTTP method. Omit or set to `"GET"` for query-string-based sharing. */
@@ -254,20 +333,40 @@ interface ManifestShareTargetGet {
   params: ShareTargetParams;
 }
 
-/** Share target using HTTP POST. Supports file uploads via the `files` param. */
-interface ManifestShareTargetPost {
+/** Share target using HTTP POST with a URL-encoded body (no files). */
+export interface ManifestShareTargetPostUrlEncoded {
   /** URL that handles the share action. Must be within the manifest scope. */
   action: UrlOrPath;
   /** HTTP method. Must be `"POST"` for form-based sharing. */
   method: "POST";
-  /** Encoding type for the POST body. Use `"multipart/form-data"` when sharing files. */
-  enctype?: "application/x-www-form-urlencoded" | "multipart/form-data";
+  /**
+   * Encoding type for the POST body.
+   * @default "application/x-www-form-urlencoded"
+   */
+  enctype?: "application/x-www-form-urlencoded";
+  /** Parameters to include in the POST body. */
+  params: ShareTargetParams;
+}
+
+/** Share target using HTTP POST with a multipart body, which is required to receive files. */
+export interface ManifestShareTargetPostMultipart {
+  /** URL that handles the share action. Must be within the manifest scope. */
+  action: UrlOrPath;
+  /** HTTP method. Must be `"POST"` for form-based sharing. */
+  method: "POST";
+  /** Encoding type for the POST body. Required when sharing files. */
+  enctype: "multipart/form-data";
   /** Parameters to include in the POST body, optionally including files. */
   params: ShareTargetParams & {
     /** Files the share target accepts. */
     files?: NonEmptyArray<ShareTargetFile>;
   };
 }
+
+/** Share target using HTTP POST. Files can only be received with `enctype: "multipart/form-data"`. */
+export type ManifestShareTargetPost =
+  | ManifestShareTargetPostUrlEncoded
+  | ManifestShareTargetPostMultipart;
 
 /**
  * Web Share Target configuration (GET or POST).
@@ -284,8 +383,8 @@ export type ManifestShareTarget =
   | ManifestShareTargetGet
   | ManifestShareTargetPost;
 
-// Internal: valid client_mode values for ManifestLaunchHandler.
-type LaunchHandlerClientMode =
+/** How an app launch is routed to a client when the app is already running. */
+export type LaunchHandlerClientMode =
   | "auto"
   | "navigate-new"
   | "navigate-existing"
@@ -296,7 +395,7 @@ type LaunchHandlerClientMode =
  * when launched while already running.
  *
  * `client_mode` determines whether a new window is opened or an
- * existing one is reused.
+ * existing one is reused. An array lists modes in order of preference.
  *
  * @see https://developer.mozilla.org/en-US/docs/Web/Manifest/launch_handler
  */
@@ -304,6 +403,25 @@ export interface ManifestLaunchHandler {
   client_mode?:
     | LaunchHandlerClientMode
     | NonUnitaryArray<LaunchHandlerClientMode>;
+}
+
+/**
+ * An additional origin that is considered part of the app scope.
+ *
+ * Serialized with `type: "origin"` (required by browsers) and the origin
+ * reduced to scheme and host.
+ */
+export interface ManifestScopeExtension {
+  /** Kind of extension. Only `"origin"` is currently defined and it is emitted automatically. */
+  type?: "origin";
+  /** Bare https origin (scheme and host, no path) to extend the scope to. */
+  origin: `https://${string}`;
+}
+
+/** Note-taking integration: lets the app be launched to create a new note. */
+export interface ManifestNoteTaking {
+  /** URL opened to create a new note. Must be within the manifest scope. */
+  new_note_url: UrlOrPath;
 }
 
 /**
@@ -326,15 +444,21 @@ interface ManifestOptionsBase {
   start_url?: UrlOrPath;
   /**
    * Navigation scope of the app. Pages outside this scope are opened in a browser tab.
-   * Must be a valid absolute URL. Use a trailing slash to indicate a directory
-   * (e.g. `"https://example.com/app/"` matches all pages under `/app/`).
    *
+   * An absolute URL or a path, without query or fragment. Browsers treat the
+   * scope path as a string prefix, so `"/app"` would also cover
+   * `/application`; end the scope with a slash (`"/app/"`) to limit it to
+   * that directory. {@link validateManifest} flags URLs that match only
+   * because of a missing trailing slash.
+   *
+   * @example "/"
    * @example "https://example.com/app/"
    */
-  scope?: AbsoluteUrl;
+  scope?: UrlOrPath;
   /**
-   * Unique identifier for the application.
-   * When specified as a URL or path, it is validated and normalized.
+   * Unique identifier for the application, resolved against the
+   * `start_url` origin. Must be same-origin with `start_url`; it does not
+   * have to be within `scope`. Normalized when given as a URL or path.
    *
    * @example "/"
    * @example "https://example.com/?app=myapp"
@@ -374,6 +498,11 @@ interface ManifestOptionsBase {
    */
   categories?: NonEmptyArray<string>;
   /**
+   * International Age Rating Coalition certificate ID.
+   * @example "e84b072d-71b3-4d3e-86ae-31a8ce4e53b7"
+   */
+  iarc_rating_id?: string;
+  /**
    * Primary language of the manifest values (BCP 47 tag).
    *
    * Not validated at runtime because BCP 47 parsing is complex
@@ -400,7 +529,9 @@ interface ManifestOptionsBase {
   /** Controls how the app is launched (e.g. reuse existing window). */
   launch_handler?: ManifestLaunchHandler;
   /** Additional origins that are considered part of the app scope. */
-  scope_extensions?: NonEmptyArray<{ origin: AbsoluteUrl }>;
+  scope_extensions?: NonEmptyArray<ManifestScopeExtension>;
+  /** Note-taking integration. */
+  note_taking?: ManifestNoteTaking;
 }
 
 /**

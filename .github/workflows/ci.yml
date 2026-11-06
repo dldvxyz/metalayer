@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -17,8 +17,12 @@ jobs:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
+      # The toolchain (tsdown, Vitest) needs a current Node.js LTS.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
@@ -31,13 +35,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [ 20, 22, 24 ]
+        node: [20, 22, 24, 26]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run build
+      # Switch to the Node.js version under test only after building.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
       - run: node scripts/check-dist.mjs

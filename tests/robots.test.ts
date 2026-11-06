@@ -1,181 +1,83 @@
 import { describe, expect, it } from "vitest";
-import { generateRobotsTxt, validateRobotsTxt } from "../src/robots.js";
 
-describe("generateRobotsTxt", () => {
-  it("generates a basic disallow-all robots.txt", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"] }]
-    });
-    expect(result).toBe("User-agent: *\nDisallow: /\n");
-  });
+import type { RobotsOptions } from "../src/index.js";
+import { generateRobotsTxt, validateRobotsTxt } from "../src/index.js";
+import { expectIssues, expectValid, untyped } from "./helpers.js";
 
-  it("generates allow-all robots.txt", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }]
-    });
-    expect(result).toBe("User-agent: *\nAllow: /\n");
-  });
-
-  it("handles multiple rules with blank line separator", () => {
-    const result = generateRobotsTxt({
-      rules: [
-        { userAgent: ["Googlebot"], allow: ["/"] },
-        { userAgent: ["Bingbot"], disallow: ["/private"] }
-      ]
-    });
-    expect(result).toBe(
-      "User-agent: Googlebot\nAllow: /\n\nUser-agent: Bingbot\nDisallow: /private\n"
-    );
-  });
-
-  it("handles multiple user agents in one rule", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["Googlebot", "Bingbot"], disallow: ["/secret"] }]
-    });
-    expect(result).toBe(
-      "User-agent: Googlebot\nUser-agent: Bingbot\nDisallow: /secret\n"
-    );
-  });
-
-  it("handles arrays of allow and disallow paths", () => {
-    const result = generateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/public", "/assets"],
-          disallow: ["/admin", "/api"]
-        }
-      ]
-    });
-    expect(result).toBe(
-      "User-agent: *\nAllow: /public\nAllow: /assets\nDisallow: /admin\nDisallow: /api\n"
-    );
-  });
-
-  it("outputs allow before disallow", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/public"], disallow: ["/private"] }]
-    });
-    const allowIndex = result.indexOf("Allow:");
-    const disallowIndex = result.indexOf("Disallow:");
-    expect(allowIndex).toBeLessThan(disallowIndex);
-  });
-
-  it("includes crawl-delay", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"], crawlDelay: 10 }]
-    });
-    expect(result).toBe("User-agent: *\nDisallow: /\nCrawl-delay: 10\n");
-  });
-
-  it("includes a single sitemap", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://example.com/sitemap.xml"]
-    });
-    expect(result).toBe(
-      "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\n"
-    );
-  });
-
-  it("includes multiple sitemaps", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: [
-        "https://example.com/sitemap.xml",
-        "https://example.com/sitemap-news.xml"
-      ]
-    });
-    expect(result).toContain("Sitemap: https://example.com/sitemap.xml");
-    expect(result).toContain("Sitemap: https://example.com/sitemap-news.xml");
-  });
-
-  it("includes host directive", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      host: "example.com"
-    });
-    expect(result).toContain("Host: example.com");
-  });
-
-  it("includes host and sitemaps together", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://example.com/sitemap.xml"],
-      host: "example.com"
-    });
-    expect(result).toContain("Sitemap: https://example.com/sitemap.xml");
-    expect(result).toContain("Host: example.com");
-  });
-
-  it("handles both allow and disallow as single-element arrays", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/yes"], disallow: ["/no"] }]
-    });
-    expect(result).toBe("User-agent: *\nAllow: /yes\nDisallow: /no\n");
-  });
-
-  it("places sitemaps after rules", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"] }],
-      sitemaps: ["https://example.com/sitemap.xml"]
-    });
-    expect(result).toBe(
-      "User-agent: *\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\n"
-    );
-  });
-
-  it("places host after sitemaps", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://example.com/sitemap.xml"],
-      host: "example.com"
-    });
-    const sitemapIndex = result.indexOf("Sitemap:");
-    const hostIndex = result.indexOf("Host:");
-    expect(sitemapIndex).toBeLessThan(hostIndex);
-  });
-
-  it("outputs multiple sitemaps on separate lines", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: [
-        "https://example.com/sitemap.xml",
-        "https://example.com/sitemap-news.xml"
-      ]
-    });
-    expect(result).toBe(
-      "User-agent: *\nAllow: /\n\nSitemap: https://example.com/sitemap.xml\nSitemap: https://example.com/sitemap-news.xml\n"
-    );
-  });
-
-  it("includes crawl-delay with allow and disallow paths", () => {
-    const result = generateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/public"],
-          disallow: ["/private"],
-          crawlDelay: 5
-        }
-      ]
-    });
-    expect(result).toBe(
-      "User-agent: *\nAllow: /public\nDisallow: /private\nCrawl-delay: 5\n"
-    );
-  });
-
-  it("combines all directives in one output", () => {
-    const result = generateRobotsTxt({
-      rules: [
-        { userAgent: ["*"], allow: ["/"] },
-        { userAgent: ["GPTBot"], disallow: ["/"] }
-      ],
-      sitemaps: ["https://example.com/sitemap.xml"],
-      host: "example.com"
-    });
-    expect(result).toBe(
-      [
+describe(generateRobotsTxt, () => {
+  it.each<{ name: string; options: RobotsOptions; expected: string }>([
+    {
+      name: "a disallow-all group",
+      options: { rules: [{ userAgent: ["*"], disallow: ["/"] }] },
+      expected: "User-agent: *\nDisallow: /\n"
+    },
+    {
+      name: "an allow-all group",
+      options: { rules: [{ userAgent: ["*"], allow: ["/"] }] },
+      expected: "User-agent: *\nAllow: /\n"
+    },
+    {
+      name: "groups separated by a blank line",
+      options: {
+        rules: [
+          { userAgent: ["Googlebot"], allow: ["/"] },
+          { userAgent: ["Bingbot"], disallow: ["/private"] }
+        ]
+      },
+      expected:
+        "User-agent: Googlebot\nAllow: /\n\nUser-agent: Bingbot\nDisallow: /private\n"
+    },
+    {
+      name: "several user agents in one group",
+      options: {
+        rules: [{ userAgent: ["Googlebot", "Bingbot"], disallow: ["/secret"] }]
+      },
+      expected:
+        "User-agent: Googlebot\nUser-agent: Bingbot\nDisallow: /secret\n"
+    },
+    {
+      name: "allow before disallow, keeping array order, then crawl-delay",
+      options: {
+        rules: [
+          {
+            userAgent: ["*"],
+            allow: ["/public", "/assets"],
+            disallow: ["/admin", "/api"],
+            crawlDelay: 5
+          }
+        ]
+      },
+      expected:
+        "User-agent: *\nAllow: /public\nAllow: /assets\nDisallow: /admin\nDisallow: /api\nCrawl-delay: 5\n"
+    },
+    {
+      name: "wildcard and end-anchor patterns verbatim",
+      options: {
+        rules: [{ userAgent: ["*"], disallow: ["/*.php$", "/fish*", "/*//"] }]
+      },
+      expected:
+        "User-agent: *\nDisallow: /*.php$\nDisallow: /fish*\nDisallow: /*//\n"
+    },
+    {
+      name: "normalized sitemaps after the groups, one per line",
+      options: {
+        rules: [{ userAgent: ["*"], disallow: ["/"] }],
+        sitemaps: ["https://example.com/sitemap.xml", "https://hello.world"]
+      },
+      expected:
+        "User-agent: *\nDisallow: /\n\nSitemap: https://example.com/sitemap.xml\nSitemap: https://hello.world/\n"
+    },
+    {
+      name: "the host directive last",
+      options: {
+        rules: [
+          { userAgent: ["*"], allow: ["/"] },
+          { userAgent: ["GPTBot"], disallow: ["/"] }
+        ],
+        sitemaps: ["https://example.com/sitemap.xml"],
+        host: "example.com"
+      },
+      expected: [
         "User-agent: *",
         "Allow: /",
         "",
@@ -186,416 +88,322 @@ describe("generateRobotsTxt", () => {
         "Host: example.com",
         ""
       ].join("\n")
-    );
+    },
+    {
+      name: "no host directive for an empty host",
+      options: { rules: [{ userAgent: ["*"], allow: ["/"] }], host: "" },
+      expected: "User-agent: *\nAllow: /\n"
+    }
+  ])("generates $name", ({ options, expected }) => {
+    expect(generateRobotsTxt(options)).toBe(expected);
   });
 
-  it("ends with a trailing newline", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"] }]
-    });
-    expect(result.endsWith("\n")).toBe(true);
-  });
-
-  it("normalizes sitemap URLs in output", () => {
-    const result = generateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://hello.world"]
-    });
-    expect(result).toContain("Sitemap: https://hello.world/");
+  it("accepts readonly input and does not mutate it", () => {
+    const options = {
+      rules: [{ userAgent: ["*"], allow: ["/a"], disallow: ["/b"] }],
+      sitemaps: ["https://example.com/sitemap.xml"]
+    } as const;
+    const snapshot = structuredClone(options);
+    generateRobotsTxt(options);
+    expect(options).toStrictEqual(snapshot);
   });
 });
 
-describe("validateRobotsTxt", () => {
-  it("returns valid for a correct config", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"] }]
-    });
-    expect(result).toEqual({
-      valid: true,
-      options: { rules: [{ userAgent: ["*"], disallow: ["/"] }] }
-    });
-  });
-
-  it("returns valid for multiple rules with different agents", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        { userAgent: ["Googlebot"], allow: ["/"] },
-        { userAgent: ["Bingbot"], disallow: ["/private"] }
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("returns valid for * alongside specific agents in separate rules", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        { userAgent: ["*"], disallow: ["/"] },
-        { userAgent: ["Googlebot"], allow: ["/"] }
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("returns valid when allow and disallow have different paths", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/public"],
-          disallow: ["/private"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("returns the options back when valid", () => {
-    const result = validateRobotsTxt({
+describe(validateRobotsTxt, () => {
+  it("returns the options when valid", () => {
+    const options = {
       rules: [{ userAgent: ["*"], allow: ["/"] }],
       sitemaps: ["https://example.com/sitemap.xml"],
       host: "example.com"
+    } as const;
+    expect(validateRobotsTxt(options)).toStrictEqual({ valid: true, options });
+  });
+
+  it.each<{ name: string; options: RobotsOptions }>([
+    {
+      name: "the README example",
+      options: {
+        rules: [
+          { userAgent: ["*"], allow: ["/"] },
+          { userAgent: ["GPTBot"], disallow: ["/"] }
+        ],
+        sitemaps: ["https://example.com/sitemap.xml"]
+      }
+    },
+    {
+      name: "* alongside specific agents in separate rules",
+      options: {
+        rules: [
+          { userAgent: ["*"], disallow: ["/"] },
+          { userAgent: ["Googlebot"], allow: ["/"] }
+        ]
+      }
+    },
+    {
+      name: "product tokens with digits",
+      options: { rules: [{ userAgent: ["360Spider"], disallow: ["/"] }] }
+    },
+    {
+      name: "wildcard, end-anchor and consecutive-slash patterns",
+      options: {
+        rules: [
+          {
+            userAgent: ["*"],
+            allow: ["/public/", "/*.css$"],
+            disallow: ["/private/", "/fish*", "/*//", "/a$"]
+          }
+        ]
+      }
+    },
+    {
+      name: "patterns that differ for a crawler",
+      options: {
+        rules: [
+          {
+            userAgent: ["*"],
+            allow: ["/products", "/A", "/a/"],
+            disallow: ["/products?", "/a", "/*"]
+          }
+        ]
+      }
+    },
+    {
+      name: "a positive integer crawl delay",
+      options: {
+        rules: [{ userAgent: ["*"], disallow: ["/"], crawlDelay: 10 }]
+      }
+    },
+    {
+      name: "sitemaps on different hosts and trailing-slash variants",
+      options: {
+        rules: [{ userAgent: ["*"], allow: ["/"] }],
+        sitemaps: [
+          "https://example.com/sitemap.xml",
+          "https://example.com/sitemap.xml/",
+          "https://www.example.com/sitemap.xml",
+          "https://sitemaps.example.net/host1.xml"
+        ]
+      }
+    }
+  ])("accepts $name", ({ options }) => {
+    expectValid(validateRobotsTxt(options));
+  });
+
+  describe("user agents", () => {
+    it("rejects * mixed with specific agents in the same rule", () => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [{ userAgent: ["*", "Googlebot", "Bingbot"], disallow: ["/"] }]
+        }),
+        ['wildcard "*" mixed with specific user agents: Googlebot, Bingbot']
+      );
     });
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.options.rules[0].userAgent).toEqual(["*"]);
-      expect(result.options.sitemaps).toEqual([
-        "https://example.com/sitemap.xml"
+
+    it("reports ['*', '*'] as a repeated agent, not as wildcard mixing", () => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [{ userAgent: ["*", "*"], disallow: ["/"] }]
+        }),
+        ['User agent "*" is listed twice in the same rule']
+      );
+    });
+
+    it("rejects duplicate user agents across rules, case-insensitively", () => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [
+            { userAgent: ["Googlebot", "Bingbot"], allow: ["/"] },
+            { userAgent: ["googlebot"], disallow: ["/other"] }
+          ]
+        }),
+        ['Duplicate user agent "googlebot" found across multiple rules']
+      );
+    });
+
+    it.each([
+      ["Mozilla/5.0", "is not a valid product token"],
+      ["Yahoo! Slurp", "is not a valid product token"],
+      ["Google bot", "is not a valid product token"],
+      [" Googlebot", "is not a valid product token"],
+      ["x\nUser-agent: *", "is not a valid product token"],
+      ["", "is empty"]
+    ])("rejects the user agent %j", (agent, problem) => {
+      expectIssues(
+        validateRobotsTxt({ rules: [{ userAgent: [agent], disallow: ["/"] }] }),
+        [`User agent ${JSON.stringify(agent)} ${problem}`]
+      );
+    });
+
+    it("rejects a rule without user agents", () => {
+      expectIssues(
+        validateRobotsTxt(
+          untyped({ rules: [{ userAgent: [], disallow: ["/"] }] })
+        ),
+        ["Rule #1 has no user agents"]
+      );
+    });
+  });
+
+  describe("paths", () => {
+    it.each([
+      ["/a#b", "%23"],
+      ["/my page", "%20"],
+      ["/a$b", "%24"],
+      ["/a\nAllow: /", "control character"],
+      ["admin", 'must start with "/"']
+    ])("rejects the pattern %j", (path, problem) => {
+      expectIssues(
+        validateRobotsTxt(
+          untyped({ rules: [{ userAgent: ["*"], disallow: [path] }] })
+        ),
+        [`Disallow path ${JSON.stringify(path)} for user agent *`]
+      );
+      expectIssues(
+        validateRobotsTxt(
+          untyped({ rules: [{ userAgent: ["*"], allow: [path] }] })
+        ),
+        [problem]
+      );
+    });
+
+    it("rejects a rule with neither allow nor disallow", () => {
+      expectIssues(
+        validateRobotsTxt(untyped({ rules: [{ userAgent: ["*"] }] })),
+        ["has neither Allow nor Disallow paths"]
+      );
+    });
+
+    it("rejects an empty rules array", () => {
+      expectIssues(validateRobotsTxt(untyped({ rules: [] })), [
+        "At least one rule is required"
       ]);
-      expect(result.options.host).toBe("example.com");
-    }
+    });
   });
 
-  // Wildcard mixed with specific agents in the same rule
+  describe("allow/disallow overlap", () => {
+    it("lists every pattern that appears in both lists", () => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [
+            {
+              userAgent: ["*"],
+              allow: ["/a", "/b", "/c"],
+              disallow: ["/b", "/c", "/d"]
+            }
+          ]
+        }),
+        ['Path(s) "/b", "/c" appear in both Allow and Disallow']
+      );
+    });
 
-  it("detects * mixed with a specific agent in the same rule", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*", "Googlebot"],
-          disallow: ["/"]
-        }
+    it.each([
+      ["/café", "/caf%C3%A9"],
+      ["/%7Ejoe", "/~joe"],
+      ["/a%2fb", "/a%2Fb"],
+      ["/page", "/page"]
+    ] as const)("treats %j and %j as the same pattern", (allow, disallow) => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [{ userAgent: ["*"], allow: [allow], disallow: [disallow] }]
+        }),
+        ["appear in both Allow and Disallow"]
+      );
+    });
+  });
+
+  describe("crawl delay", () => {
+    it.each([0, -1, 0.5, Number.POSITIVE_INFINITY, Number.NaN])(
+      "rejects %d",
+      (crawlDelay) => {
+        expectIssues(
+          validateRobotsTxt({
+            rules: [{ userAgent: ["*"], disallow: ["/"], crawlDelay }]
+          }),
+          ["must be a positive integer number of seconds"]
+        );
+      }
+    );
+  });
+
+  describe("sitemaps", () => {
+    it.each([
+      "not-a-url",
+      "ftp://example.com/sitemap.xml",
+      "https://example.com//sitemap.xml"
+    ])("rejects %j", (sitemap) => {
+      expectIssues(
+        validateRobotsTxt(
+          untyped({
+            rules: [{ userAgent: ["*"], allow: ["/"] }],
+            sitemaps: [sitemap]
+          })
+        ),
+        [`Sitemap URL "${sitemap}" is not a valid absolute URL`]
+      );
+    });
+
+    it("rejects duplicate sitemap URLs after normalization", () => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [{ userAgent: ["*"], allow: ["/"] }],
+          sitemaps: [
+            "https://example.com/sitemap.xml",
+            "https://EXAMPLE.com/sitemap.xml"
+          ]
+        }),
+        ['Duplicate sitemap URL "https://example.com/sitemap.xml"']
+      );
+    });
+  });
+
+  describe("host", () => {
+    it.each([
+      "example.com",
+      "https://example.com",
+      "example.xn--p1ai",
+      "москва.рф",
+      "example.com:8080"
+    ])("accepts %j", (host) => {
+      expectValid(
+        validateRobotsTxt({ rules: [{ userAgent: ["*"], allow: ["/"] }], host })
+      );
+    });
+
+    it.each([
+      "example.com/",
+      "example.com/path",
+      "https://example.com/?q=1",
+      "user:pass@example.com",
+      "exa mple.com",
+      ""
+    ])("rejects %j", (host) => {
+      expectIssues(
+        validateRobotsTxt({
+          rules: [{ userAgent: ["*"], allow: ["/"] }],
+          host
+        }),
+        [`Host "${host}" is not a valid hostname`]
+      );
+    });
+  });
+
+  it("collects every issue, in order", () => {
+    expectIssues(
+      validateRobotsTxt({
+        rules: [
+          {
+            userAgent: ["*", "Googlebot"],
+            allow: ["/page"],
+            disallow: ["/page"]
+          },
+          { userAgent: ["Googlebot"], disallow: ["/"] }
+        ]
+      }),
+      [
+        'wildcard "*" mixed',
+        "appear in both Allow and Disallow",
+        'Duplicate user agent "Googlebot"'
       ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues).toHaveLength(1);
-      expect(result.issues[0]).toContain("wildcard");
-      expect(result.issues[0]).toContain("Googlebot");
-    }
-  });
-
-  it("detects * mixed with multiple specific agents in the same rule", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*", "Googlebot", "Bingbot"],
-          disallow: ["/"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Googlebot");
-      expect(result.issues[0]).toContain("Bingbot");
-    }
-  });
-
-  // Duplicate user agents across rules
-
-  it("detects duplicate user agents across rules", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        { userAgent: ["Googlebot"], allow: ["/"] },
-        { userAgent: ["Googlebot"], disallow: ["/private"] }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues).toHaveLength(1);
-      expect(result.issues[0]).toContain("Duplicate");
-      expect(result.issues[0]).toContain("Googlebot");
-    }
-  });
-
-  it("detects duplicate * across rules", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        { userAgent: ["*"], allow: ["/"] },
-        { userAgent: ["*"], disallow: ["/secret"] }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Duplicate");
-      expect(result.issues[0]).toContain("*");
-    }
-  });
-
-  it("detects duplicate agent when one is in a multi-agent rule", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["Googlebot", "Bingbot"],
-          allow: ["/"]
-        },
-        { userAgent: ["Googlebot"], disallow: ["/other"] }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Duplicate");
-      expect(result.issues[0]).toContain("Googlebot");
-    }
-  });
-
-  // Overlapping paths in allow and disallow
-
-  it("detects the same path in allow and disallow", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/page"],
-          disallow: ["/page"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues).toHaveLength(1);
-      expect(result.issues[0]).toContain("/page");
-      expect(result.issues[0]).toContain("Allow");
-      expect(result.issues[0]).toContain("Disallow");
-    }
-  });
-
-  it("detects multiple overlapping paths", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/a", "/b", "/c"],
-          disallow: ["/b", "/c", "/d"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("/b");
-      expect(result.issues[0]).toContain("/c");
-    }
-  });
-
-  it("does not flag non-overlapping array paths", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/public", "/assets"],
-          disallow: ["/admin", "/api"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  // Multiple issues at once
-
-  it("collects multiple issues from different rules", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*", "Googlebot"],
-          allow: ["/page"],
-          disallow: ["/page"]
-        },
-        { userAgent: ["Googlebot"], disallow: ["/"] }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      // wildcard mixed + overlapping path + duplicate Googlebot = 3 issues
-      expect(result.issues).toHaveLength(3);
-    }
-  });
-
-  // Sitemap URL validation
-
-  it("returns valid for correct sitemap URLs", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://example.com/sitemap.xml"]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects an invalid sitemap URL", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["not-a-url" as any]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid URL");
-    }
-  });
-
-  it("rejects sitemap URLs with different origins", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: [
-        "https://example.com/sitemap.xml",
-        "https://other.com/sitemap.xml"
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("different origin");
-    }
-  });
-
-  it("rejects duplicate sitemap URLs", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: [
-        "https://example.com/sitemap.xml",
-        "https://example.com/sitemap.xml"
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Duplicate sitemap URL");
-    }
-  });
-
-  it("detects duplicate sitemap URLs after normalization", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: [
-        "https://example.com/sitemap.xml",
-        "https://example.com/sitemap.xml/"
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects sitemap URLs with consecutive slashes in the path", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      sitemaps: ["https://example.com//sitemap.xml"]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid URL");
-    }
-  });
-
-  // Path validation
-
-  it("rejects invalid allow path", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/foo//bar"] }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid path");
-    }
-  });
-
-  it("rejects invalid disallow path", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/foo//bar"] }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid path");
-    }
-  });
-
-  it("accepts valid allow and disallow paths", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          allow: ["/public/"],
-          disallow: ["/private/"]
-        }
-      ]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  // Crawl delay validation
-
-  it("rejects crawl delay of 0", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"], crawlDelay: 0 }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("positive number");
-    }
-  });
-
-  it("rejects negative crawl delay", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], disallow: ["/"], crawlDelay: -1 }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("positive number");
-    }
-  });
-
-  it("rejects Infinity crawl delay", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        {
-          userAgent: ["*"],
-          disallow: ["/"],
-          crawlDelay: Number.POSITIVE_INFINITY
-        }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("positive number");
-    }
-  });
-
-  // Case-insensitive duplicate agents
-
-  it("detects case-insensitive duplicate agents across rules", () => {
-    const result = validateRobotsTxt({
-      rules: [
-        { userAgent: ["Googlebot"], allow: ["/"] },
-        { userAgent: ["googlebot"], disallow: ["/secret"] }
-      ]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Duplicate");
-    }
-  });
-
-  // Host validation
-
-  it("accepts a valid host", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      host: "example.com"
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects host with protocol", () => {
-    const result = validateRobotsTxt({
-      rules: [{ userAgent: ["*"], allow: ["/"] }],
-      host: "https://example.com"
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid hostname");
-    }
+    );
   });
 });

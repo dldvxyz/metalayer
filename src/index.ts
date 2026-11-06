@@ -6,8 +6,13 @@
  * @module
  */
 
-export { generateManifest, validateManifest } from "./manifest.js";
-export { generateRobotsTxt, validateRobotsTxt } from "./robots.js";
-export { generateSitemap, validateSitemap } from "./sitemap.js";
-
-export type * from "./types/index.js";
+export { generateManifest } from "./manifest/generate.js";
+export type * from "./manifest/types.js";
+export { validateManifest } from "./manifest/validate.js";
+export { generateRobotsTxt } from "./robots/generate.js";
+export type * from "./robots/types.js";
+export { validateRobotsTxt } from "./robots/validate.js";
+export type * from "./shared/types.js";
+export { generateSitemap } from "./sitemap/generate.js";
+export type * from "./sitemap/types.js";
+export { validateSitemap } from "./sitemap/validate.js";

@@ -9,10 +9,10 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
-    "isolatedDeclarations": true,
-    "declaration": true,
+    "allowJs": true,
+    "checkJs": true,
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests", "scripts"]
+  "include": ["src", "tests", "scripts", "*.config.ts"]
 }

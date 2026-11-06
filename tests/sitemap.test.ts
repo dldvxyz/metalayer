@@ -1,92 +1,52 @@
-import { describe, expect, it } from "vitest";
-import { generateSitemap, validateSitemap } from "../src/sitemap.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-describe("generateSitemap", () => {
-  it("generates a sitemap with a single URL", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }]
-    });
-    expect(result).toContain('<?xml version="1.0" encoding="UTF-8"?>');
-    expect(result).toContain("<loc>https://example.com/</loc>");
-    expect(result).toContain("</urlset>");
-  });
+import type {
+  NonEmptyArray,
+  SitemapOptions,
+  SitemapUrl
+} from "../src/index.js";
+import { generateSitemap, validateSitemap } from "../src/index.js";
+import { expectIssues, expectValid, untyped } from "./helpers.js";
 
-  it("includes optional fields", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [
-        {
-          path: "/",
-          lastmod: "2024-01-15",
-          changefreq: "weekly",
-          priority: 1.0
-        }
-      ]
-    });
-    expect(result).toContain("<lastmod>2024-01-15</lastmod>");
-    expect(result).toContain("<changefreq>weekly</changefreq>");
-    expect(result).toContain("<priority>1.0</priority>");
-  });
+const ORIGIN = "https://example.com";
 
-  it("handles multiple URLs", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }, { path: "/about" }, { path: "/contact" }]
-    });
-    expect(result).toContain("<loc>https://example.com/</loc>");
-    expect(result).toContain("<loc>https://example.com/about</loc>");
-    expect(result).toContain("<loc>https://example.com/contact</loc>");
-  });
+/** Builds a path whose full URL under {@link ORIGIN} has the given length. */
+function pathForUrlLength(length: number): `/${string}` {
+  return `/${"a".repeat(length - ORIGIN.length - 1)}`;
+}
 
-  it("formats priority with one decimal place", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: 0.5 }]
-    });
-    expect(result).toContain("<priority>0.5</priority>");
-  });
+/** Builds the given number of distinct URL entries. */
+function entries(count: number): NonEmptyArray<SitemapUrl> {
+  return [
+    { path: "/p/0" },
+    ...Array.from({ length: count - 1 }, (_, index): SitemapUrl => ({
+      path: `/p/${index + 1}`
+    }))
+  ];
+}
 
-  it("pretty-prints with indentation", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }]
-    });
-    expect(result).toContain("  <url>");
-    expect(result).toContain("    <loc>");
-  });
+/** Validates a single-URL sitemap with the given lastmod, bypassing the types. */
+function validateLastmod(lastmod: string) {
+  return validateSitemap(
+    untyped({ origin: ORIGIN, urls: [{ path: "/", lastmod }] })
+  );
+}
 
-  it("includes the correct XML namespace", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }]
-    });
-    expect(result).toContain(
-      'xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"'
-    );
-  });
-
-  it("ends with a trailing newline", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }]
-    });
-    expect(result.endsWith("\n")).toBe(true);
-  });
-
-  it("generates exact pretty output for a full URL entry", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [
-        {
-          path: "/",
-          lastmod: "2024-06-01",
-          changefreq: "daily",
-          priority: 0.8
-        }
-      ]
-    });
-    expect(result).toBe(
+describe(generateSitemap, () => {
+  it("generates exact output for a full entry", () => {
+    expect(
+      generateSitemap({
+        origin: ORIGIN,
+        urls: [
+          {
+            path: "/",
+            lastmod: "2024-06-01",
+            changefreq: "daily",
+            priority: 0.8
+          }
+        ]
+      })
+    ).toBe(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
@@ -102,277 +62,324 @@ describe("generateSitemap", () => {
     );
   });
 
-  it("generates multiple URLs with mixed optional fields", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [
-        { path: "/", priority: 1.0 },
-        { path: "/about", lastmod: "2024-01-01" },
-        { path: "/blog", changefreq: "weekly" }
-      ]
-    });
-    expect(result).toContain("<priority>1.0</priority>");
-    expect(result).toContain("<lastmod>2024-01-01</lastmod>");
-    expect(result).toContain("<changefreq>weekly</changefreq>");
-    // Each URL should have its own <url> block
-    const urlCount = (result.match(/<url>/gu) || []).length;
-    expect(urlCount).toBe(3);
-  });
-
-  it("formats priority 0 as 0.0", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: 0 }]
-    });
-    expect(result).toContain("<priority>0.0</priority>");
-  });
-
-  it("formats priority 1 as 1.0", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: 1 }]
-    });
-    expect(result).toContain("<priority>1.0</priority>");
-  });
-
-  it("escapes XML special characters in URLs", () => {
-    const result = generateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/search?a=1&b=2" }]
-    });
-    expect(result).toContain(
-      "<loc>https://example.com/search?a=1&amp;b=2</loc>"
+  it("writes one <url> per entry with only the fields given", () => {
+    expect(
+      generateSitemap({
+        origin: ORIGIN,
+        urls: [
+          { path: "/", priority: 1 },
+          { path: "/about", lastmod: "2024-01-01" },
+          { path: "/blog", changefreq: "weekly" }
+        ]
+      })
+    ).toBe(
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        "  <url>",
+        "    <loc>https://example.com/</loc>",
+        "    <priority>1.0</priority>",
+        "  </url>",
+        "  <url>",
+        "    <loc>https://example.com/about</loc>",
+        "    <lastmod>2024-01-01</lastmod>",
+        "  </url>",
+        "  <url>",
+        "    <loc>https://example.com/blog</loc>",
+        "    <changefreq>weekly</changefreq>",
+        "  </url>",
+        "</urlset>",
+        ""
+      ].join("\n")
     );
-    expect(result).not.toContain("&b=2</loc>");
+  });
+
+  it.each([
+    [0, "0.0"],
+    [0.5, "0.5"],
+    [1, "1.0"]
+  ])("formats priority %d as %s", (priority, formatted) => {
+    expect(
+      generateSitemap({ origin: ORIGIN, urls: [{ path: "/", priority }] })
+    ).toContain(`<priority>${formatted}</priority>`);
+  });
+
+  it.each([
+    ["https://example.com/", "/about", "https://example.com/about"],
+    ["https://example.com//", "/about", "https://example.com/about"],
+    ["https://example.com/blog", "/post", "https://example.com/blog/post"],
+    [
+      "https://example.com",
+      "/search?a=1&b=2",
+      "https://example.com/search?a=1&amp;b=2"
+    ],
+    ["https://example.com", "/it's", "https://example.com/it&apos;s"],
+    ["https://example.com", "/café", "https://example.com/caf%C3%A9"]
+  ] as const)("joins %s and %s into %s", (origin, path, loc) => {
+    expect(generateSitemap({ origin, urls: [{ path }] })).toContain(
+      `    <loc>${loc}</loc>\n`
+    );
+  });
+
+  it("does not mutate its input", () => {
+    const options = {
+      origin: ORIGIN,
+      urls: [{ path: "/", lastmod: "2024-01-01", priority: 0.5 }]
+    } as const;
+    const snapshot = structuredClone(options);
+    generateSitemap(options);
+    expect(options).toStrictEqual(snapshot);
   });
 });
 
-describe("validateSitemap", () => {
-  // Valid cases
-
-  it("returns valid for a single URL", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }]
-    });
-    expect(result.valid).toBe(true);
+describe(validateSitemap, () => {
+  it("returns the options when valid", () => {
+    const options = {
+      origin: ORIGIN,
+      urls: [{ path: "/" }, { path: "/about", priority: 0.8 }]
+    } as const;
+    expect(validateSitemap(options)).toStrictEqual({ valid: true, options });
   });
 
-  it("accepts multiple URLs", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }, { path: "/about" }]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  // Origin validation
-
-  it("rejects an invalid origin", () => {
-    const result = validateSitemap({
-      origin: "not-a-url" as any,
-      urls: [{ path: "/" }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid URL");
+  it.each<{ name: string; options: SitemapOptions }>([
+    {
+      name: "the README example",
+      options: {
+        origin: ORIGIN,
+        urls: [
+          {
+            path: "/",
+            lastmod: "2025-01-15",
+            changefreq: "weekly",
+            priority: 1
+          },
+          { path: "/about", priority: 0.8 }
+        ]
+      }
+    },
+    {
+      name: "an origin with trailing slashes",
+      options: { origin: "https://example.com//", urls: [{ path: "/" }] }
+    },
+    {
+      name: "an origin with a path prefix",
+      options: { origin: "https://example.com/blog", urls: [{ path: "/post" }] }
+    },
+    {
+      name: "valid percent-encoding",
+      options: { origin: ORIGIN, urls: [{ path: "/caf%C3%A9" }] }
+    },
+    {
+      name: "priorities at the boundaries",
+      options: {
+        origin: ORIGIN,
+        urls: [
+          { path: "/a", priority: 0 },
+          { path: "/b", priority: 0.1 },
+          { path: "/c", priority: 1 }
+        ]
+      }
+    },
+    {
+      name: "a URL just under the length limit",
+      options: { origin: ORIGIN, urls: [{ path: pathForUrlLength(2047) }] }
+    },
+    {
+      name: "50,000 URLs",
+      options: { origin: ORIGIN, urls: entries(50_000) }
     }
+  ])("accepts $name", ({ options }) => {
+    expectValid(validateSitemap(options));
   });
 
-  it("strips trailing slashes from origin before validation", () => {
-    const result = validateSitemap({
-      origin: "https://example.com//" as any,
-      urls: [{ path: "/" }]
+  describe("origin", () => {
+    it("reports an invalid origin once, not once per URL", () => {
+      expectIssues(
+        validateSitemap(
+          untyped({
+            origin: "not-a-url",
+            urls: [{ path: "/" }, { path: "/a" }]
+          })
+        ),
+        ['Origin "not-a-url" is not a valid URL']
+      );
     });
-    expect(result.valid).toBe(true);
+
+    it.each([
+      "https://example.com?x=1",
+      "https://example.com#frag",
+      "https://user:pass@example.com"
+    ] as const)("rejects %s", (origin) => {
+      expectIssues(validateSitemap({ origin, urls: [{ path: "/" }] }), [
+        "must not contain a query, fragment or credentials"
+      ]);
+    });
   });
 
-  it("rejects a constructed URL with consecutive slashes", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "//page" as any }]
+  describe("paths", () => {
+    it.each([
+      ["about", 'Path "about" must start with "/"'],
+      ["//page", 'URL for path "//page"'],
+      ["/about ", "leading or trailing whitespace"],
+      [" /about", "leading or trailing whitespace"],
+      ["/ab\ncd", String.raw`Path "/ab\ncd" contains a control character`],
+      ["/ab\tcd", String.raw`Path "/ab\tcd" contains a control character`],
+      ["/%zz", 'Path "/%zz" contains an invalid percent-encoding'],
+      [pathForUrlLength(2048), "A <loc> must be shorter than 2048 characters"]
+    ])("rejects %j", (path, issue) => {
+      expectIssues(
+        validateSitemap(untyped({ origin: ORIGIN, urls: [{ path }] })),
+        [issue]
+      );
     });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("not a valid URL");
-    }
+
+    it("flags fragments and treats them as duplicates of the bare URL", () => {
+      expectIssues(
+        validateSitemap({
+          origin: ORIGIN,
+          urls: [{ path: "/about" }, { path: "/about#team" }]
+        }),
+        [
+          'URL "https://example.com/about#team" contains a fragment',
+          "Duplicate URL"
+        ]
+      );
+    });
+
+    it("detects duplicate URLs after normalization", () => {
+      expectIssues(
+        validateSitemap({
+          origin: ORIGIN,
+          urls: [
+            { path: "/café" },
+            { path: "/caf%C3%A9" },
+            { path: "/b/../café" }
+          ]
+        }),
+        [
+          'Duplicate URL "https://example.com/caf%C3%A9"',
+          'Duplicate URL "https://example.com/caf%C3%A9"'
+        ]
+      );
+    });
   });
 
-  // Duplicate detection
-
-  it("detects duplicate paths", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" }, { path: "/" }]
+  describe("entry count", () => {
+    it("rejects an empty urls array", () => {
+      expectIssues(validateSitemap(untyped({ origin: ORIGIN, urls: [] })), [
+        "Sitemap has no URLs"
+      ]);
     });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Duplicate URL");
-    }
+
+    it("rejects more than 50,000 URLs", () => {
+      expectIssues(validateSitemap({ origin: ORIGIN, urls: entries(50_001) }), [
+        "Sitemap contains 50001 URLs. A single sitemap may contain at most 50000"
+      ]);
+    });
   });
 
-  // Priority validation
-
-  it("rejects priority below 0", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: -0.1 }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("invalid");
-    }
+  describe("priority", () => {
+    it.each([-0.1, 1.1, 0.55, Number.NaN, Number.POSITIVE_INFINITY])(
+      "rejects %d",
+      (priority) => {
+        expectIssues(
+          validateSitemap({ origin: ORIGIN, urls: [{ path: "/", priority }] }),
+          [`Priority ${priority} for "https://example.com/" is invalid`]
+        );
+      }
+    );
   });
 
-  it("rejects priority above 1", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: 1.1 }]
+  describe("changefreq", () => {
+    it("rejects values outside the protocol's list", () => {
+      expectIssues(
+        validateSitemap(
+          untyped({
+            origin: ORIGIN,
+            urls: [{ path: "/", changefreq: "Weekly" }]
+          })
+        ),
+        ['Invalid changefreq "Weekly"']
+      );
     });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("invalid");
-    }
   });
 
-  it("accepts priority at boundaries 0 and 1", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [
-        { path: "/", priority: 0 },
-        { path: "/page", priority: 1 }
-      ]
+  describe("lastmod", () => {
+    it.each([
+      "2024-01-15",
+      "2024-01-15T10:30Z",
+      "2024-01-15T10:30:00Z",
+      "2024-01-15T10:30:00.123Z",
+      "2024-01-15T10:30:00+05:30",
+      "2024-01-15T10:30:00-08:00",
+      "2024-01-15T24:00:00Z",
+      "2024-01-15T10:30:00+14:00"
+    ])("accepts %s", (lastmod) => {
+      expectValid(validateLastmod(lastmod));
     });
-    expect(result.valid).toBe(true);
+
+    it.each([
+      "01-15-2024",
+      "2024-1-5",
+      "2024",
+      "2024-01",
+      "2024-02-30",
+      "2024-13-01",
+      "1899-12-31",
+      "2024-01-15T10:30:00",
+      "2024-01-15T25:00:00Z",
+      "2024-01-15T10:60:00Z",
+      "2024-01-15T24:00:01Z",
+      "2024-01-15T10:30:00+15:00",
+      "2024-01-15T10:30:00+14:30",
+      "2024-01-15 10:30:00Z",
+      "2099-01-01"
+    ])("rejects %s", (lastmod) => {
+      expectIssues(validateLastmod(lastmod), [`Invalid lastmod "${lastmod}"`]);
+    });
+
+    describe("relative to the current time", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2024-01-15T23:00:00Z"));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it.each([
+        "2024-01-15",
+        // Already 2024-01-16 in time zones east of UTC+1
+        "2024-01-16",
+        "2024-01-15T23:00:00Z",
+        "2024-01-16T03:59:00+05:00",
+        // Within the five-minute clock-skew tolerance
+        "2024-01-15T23:04:00Z"
+      ])("accepts %s", (lastmod) => {
+        expectValid(validateLastmod(lastmod));
+      });
+
+      it.each(["2024-01-17", "2024-01-15T23:10:00Z", "2099-01-01T00:00:00Z"])(
+        "rejects %s as being in the future",
+        (lastmod) => {
+          expectIssues(validateLastmod(lastmod), [
+            `Invalid lastmod "${lastmod}"`
+          ]);
+        }
+      );
+    });
   });
 
-  // Lastmod validation
-
-  it("accepts a valid lastmod date", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2024-01-15" }]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects an invalid lastmod format", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "01-15-2024" }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Invalid lastmod");
-    }
-  });
-
-  it("rejects an impossible date", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2024-02-30" }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Invalid lastmod");
-    }
-  });
-
-  it("accepts a valid lastmod datetime with Z timezone", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2024-01-15T10:30:00Z" as any }]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("accepts a valid lastmod datetime with offset", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2024-01-15T10:30:00+05:30" as any }]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects a datetime without timezone", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2024-01-15T10:30:00" as any }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Invalid lastmod");
-    }
-  });
-
-  it("rejects a date before 1900", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "1899-12-31" }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Invalid lastmod");
-    }
-  });
-
-  // Future / today date handling
-
-  it("accepts today's date", () => {
-    const now = new Date();
-    const today = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: today as any }]
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects a future date", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", lastmod: "2099-01-01" }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("Invalid lastmod");
-    }
-  });
-
-  // Priority decimal precision
-
-  it("rejects priority with too many decimal places", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/", priority: 0.55 }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues[0]).toContain("invalid");
-    }
-  });
-
-  // Origin trailing slash
-
-  it("strips trailing slash from origin before combining with path", () => {
-    const result = generateSitemap({
-      origin: "https://example.com/",
-      urls: [{ path: "/about" }]
-    });
-    expect(result).toContain("<loc>https://example.com/about</loc>");
-    expect(result).not.toContain("example.com//about");
-  });
-
-  // Multiple issues
-
-  it("collects multiple issues", () => {
-    const result = validateSitemap({
-      origin: "https://example.com",
-      urls: [{ path: "/" as any, priority: 2, lastmod: "bad" as any }]
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) {
-      expect(result.issues.length).toBeGreaterThanOrEqual(2);
-    }
+  it("collects every issue, in order", () => {
+    expectIssues(
+      validateSitemap(
+        untyped({
+          origin: ORIGIN,
+          urls: [{ path: "/", priority: 2, lastmod: "bad" }, { path: "/" }]
+        })
+      ),
+      ["Priority 2", 'Invalid lastmod "bad"', "Duplicate URL"]
+    );
   });
 });
