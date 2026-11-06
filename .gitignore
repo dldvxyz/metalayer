@@ -1,6 +1,8 @@
 # Development
 dist/
 node_modules/
+coverage/
+*.tgz
 
 # OS files
 .DS_Store
